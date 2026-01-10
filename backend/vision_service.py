@@ -12,16 +12,17 @@ class VisionService:
         self.running = False
         self.thread = None
         self.camera_index = 0  # Logitech C910 on /dev/video0
+        self.initialized = False
 
     def start(self):
         """Start the camera capture thread"""
         if self.running:
             return
 
-        self.running = True
-        self.thread = threading.Thread(target=self._capture_loop, daemon=True)
-        self.thread.start()
-        print(f"Vision service started on camera {self.camera_index}")
+        # Don't start in __init__ to avoid issues with Flask debug mode forking
+        # Only start when first accessed
+        self.initialized = True
+        print(f"Vision service ready (camera will initialize on first use)")
 
     def stop(self):
         """Stop the camera capture"""
@@ -31,6 +32,14 @@ class VisionService:
         if self.camera:
             self.camera.release()
         self.camera = None
+
+    def _ensure_started(self):
+        """Lazily start the camera thread on first use"""
+        if not self.running and self.initialized:
+            self.running = True
+            self.thread = threading.Thread(target=self._capture_loop, daemon=True)
+            self.thread.start()
+            print(f"Vision service started on camera {self.camera_index}")
 
     def _capture_loop(self):
         """Continuously capture frames from camera"""
@@ -61,6 +70,12 @@ class VisionService:
 
     def get_frame_base64(self, max_size=800):
         """Get current frame as base64 for Claude Vision API"""
+        self._ensure_started()
+
+        # Wait briefly for first frame
+        if self.latest_frame is None:
+            time.sleep(0.5)
+
         if self.latest_frame is None:
             return None
 
@@ -97,6 +112,8 @@ class VisionService:
 
     def get_jpeg_frame(self):
         """Get current frame as JPEG bytes for streaming"""
+        self._ensure_started()
+
         if self.latest_frame is None:
             return None
 
