@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from anthropic import Anthropic
 from datetime import datetime
 import pytz
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 
 # Paths
 BASE_DIR = Path(__file__).parent.parent
