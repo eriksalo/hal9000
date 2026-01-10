@@ -200,29 +200,41 @@ textarea:focus {
 }
 
 .audio-player {
-    background: rgba(255, 0, 0, 0.1);
-    border: 2px solid #ff0000;
+    background: transparent;
+    border: 1px solid rgba(255, 0, 0, 0.3);
     border-radius: 5px;
-    padding: 20px;
+    padding: 10px;
     display: flex;
     flex-direction: column;
-    gap: 15px;
+    gap: 8px;
     align-items: center;
+    margin-top: 15px;
 }
 
 audio {
     width: 100%;
-    max-width: 500px;
+    max-width: 350px;
+    height: 32px;
+    filter: invert(1) hue-rotate(180deg);
+    opacity: 0.9;
+}
+
+audio::-webkit-media-controls-panel {
+    background-color: rgba(0, 0, 0, 0.8);
 }
 
 .btn-download {
     background: transparent;
     color: #ff0000;
-    min-width: 200px;
+    min-width: 150px;
+    padding: 8px 20px;
+    font-size: 0.85em;
+    border: 1px solid rgba(255, 0, 0, 0.5);
 }
 
 .btn-download:hover {
     background: rgba(255, 0, 0, 0.1);
+    border-color: #ff0000;
 }
 
 .quotes-section {
