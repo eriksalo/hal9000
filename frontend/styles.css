@@ -391,6 +391,64 @@ footer a:hover {
 .chat-controls {
     display: flex;
     justify-content: center;
+    align-items: center;
+    gap: 20px;
+}
+
+.btn-mic {
+    min-width: 50px;
+    padding: 15px;
+    font-size: 1.2em;
+    background: transparent;
+    color: #ff0000;
+    border: 2px solid #ff0000;
+    transition: all 0.3s ease;
+}
+
+.btn-mic:hover:not(:disabled) {
+    background: rgba(255, 0, 0, 0.1);
+}
+
+.btn-mic.listening {
+    background: #ff0000;
+    color: #000000;
+    animation: pulse-mic 0.5s ease-in-out infinite;
+}
+
+@keyframes pulse-mic {
+    0%, 100% {
+        box-shadow: 0 0 10px rgba(255, 0, 0, 0.8);
+    }
+    50% {
+        box-shadow: 0 0 20px rgba(255, 0, 0, 1);
+    }
+}
+
+.voice-status {
+    text-align: center;
+    padding: 10px;
+    background: rgba(255, 0, 0, 0.1);
+    border: 1px solid #ff0000;
+    border-radius: 5px;
+    margin-bottom: 15px;
+    color: #ffff00;
+    animation: fadeIn 0.3s ease-in;
+}
+
+.voice-mode-toggle {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 0.9em;
+    cursor: pointer;
+    user-select: none;
+}
+
+.voice-mode-toggle input[type="checkbox"] {
+    cursor: pointer;
+    width: 18px;
+    height: 18px;
+    accent-color: #ff0000;
 }
 
 @media (max-width: 600px) {

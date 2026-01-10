@@ -24,12 +24,18 @@ const chatMessages = document.getElementById('chatMessages');
 const chatInput = document.getElementById('chatInput');
 const sendBtn = document.getElementById('sendBtn');
 const clearChatBtn = document.getElementById('clearChatBtn');
+const micBtn = document.getElementById('micBtn');
+const voiceStatus = document.getElementById('voiceStatus');
+const continuousListeningCheckbox = document.getElementById('continuousListening');
 
 // State
 let currentAudioBlob = null;
 let quotes = [];
 let conversationHistory = [];
 let currentMode = 'tts';
+let recognition = null;
+let isListening = false;
+let isContinuousMode = false;
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
@@ -37,6 +43,7 @@ document.addEventListener('DOMContentLoaded', () => {
     checkBackendHealth();
     setupModeToggle();
     setupChatHandlers();
+    setupVoiceRecognition();
 });
 
 // Character counter
@@ -336,4 +343,141 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+// Voice Recognition Setup
+function setupVoiceRecognition() {
+    // Check if browser supports speech recognition
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+        console.warn('Speech recognition not supported in this browser');
+        micBtn.disabled = true;
+        micBtn.title = 'Speech recognition not supported';
+        return;
+    }
+
+    // Initialize speech recognition
+    recognition = new SpeechRecognition();
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.lang = 'en-US';
+
+    // Handle recognition results
+    recognition.onresult = (event) => {
+        const transcript = event.results[0][0].transcript;
+        console.log('Recognized:', transcript);
+
+        // Put transcript in input field
+        chatInput.value = transcript;
+
+        // Auto-send in continuous mode
+        if (isContinuousMode) {
+            sendChatMessage();
+        }
+    };
+
+    // Handle recognition errors
+    recognition.onerror = (event) => {
+        console.error('Recognition error:', event.error);
+        stopListening();
+
+        if (event.error === 'no-speech') {
+            updateStatus('No speech detected. Try again.', 'error');
+        } else if (event.error === 'not-allowed') {
+            updateStatus('Microphone access denied. Please allow microphone access.', 'error');
+            micBtn.disabled = true;
+        } else {
+            updateStatus(`Voice recognition error: ${event.error}`, 'error');
+        }
+    };
+
+    // Handle recognition end
+    recognition.onend = () => {
+        if (isContinuousMode && isListening) {
+            // Restart in continuous mode
+            try {
+                recognition.start();
+            } catch (e) {
+                console.error('Failed to restart recognition:', e);
+                stopListening();
+            }
+        } else {
+            stopListening();
+        }
+    };
+
+    // Microphone button click handler
+    micBtn.addEventListener('click', () => {
+        if (isListening) {
+            stopListening();
+        } else {
+            startListening();
+        }
+    });
+
+    // Continuous listening toggle
+    continuousListeningCheckbox.addEventListener('change', (e) => {
+        isContinuousMode = e.target.checked;
+
+        if (isContinuousMode && !isListening) {
+            updateStatus('Continuous listening mode enabled. Click microphone to start.', 'info');
+        } else if (!isContinuousMode && isListening) {
+            // Switch to push-to-talk mode
+            updateStatus('Push-to-talk mode enabled', 'info');
+        }
+    });
+
+    // Keyboard shortcut: Hold spacebar to talk (when in chat mode)
+    document.addEventListener('keydown', (e) => {
+        if (e.code === 'Space' && currentMode === 'chat' && !chatInput.matches(':focus') && !isListening) {
+            e.preventDefault();
+            startListening();
+        }
+    });
+
+    document.addEventListener('keyup', (e) => {
+        if (e.code === 'Space' && currentMode === 'chat' && isListening && !isContinuousMode) {
+            e.preventDefault();
+            stopListening();
+        }
+    });
+}
+
+function startListening() {
+    if (!recognition) return;
+
+    try {
+        isListening = true;
+        micBtn.classList.add('listening');
+        voiceStatus.style.display = 'block';
+        voiceStatus.textContent = isContinuousMode ? 'Listening continuously...' : 'Listening...';
+        activateEye(true);
+
+        recognition.start();
+        updateStatus('Listening... Speak now.', 'processing');
+    } catch (e) {
+        console.error('Failed to start recognition:', e);
+        stopListening();
+        updateStatus('Could not start voice recognition', 'error');
+    }
+}
+
+function stopListening() {
+    if (!recognition) return;
+
+    isListening = false;
+    micBtn.classList.remove('listening');
+    voiceStatus.style.display = 'none';
+    activateEye(false);
+
+    try {
+        recognition.stop();
+    } catch (e) {
+        // Already stopped
+    }
+
+    if (!isContinuousMode) {
+        updateStatus('Voice input stopped', 'info');
+    }
 }

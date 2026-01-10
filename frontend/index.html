@@ -65,17 +65,27 @@
                 <input
                     type="text"
                     id="chatInput"
-                    placeholder="Ask HAL a question..."
+                    placeholder="Ask HAL a question or click the microphone..."
                     maxlength="500"
                 />
+                <button id="micBtn" class="btn btn-mic" title="Push to talk">
+                    🎤
+                </button>
                 <button id="sendBtn" class="btn btn-primary">
                     Send
                 </button>
+            </div>
+            <div class="voice-status" id="voiceStatus" style="display: none;">
+                Listening...
             </div>
             <div class="chat-controls">
                 <button id="clearChatBtn" class="btn btn-secondary">
                     Clear Conversation
                 </button>
+                <label class="voice-mode-toggle">
+                    <input type="checkbox" id="continuousListening">
+                    Continuous Listening
+                </label>
             </div>
         </div>
 
