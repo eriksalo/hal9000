@@ -28,6 +28,11 @@ const micBtn = document.getElementById('micBtn');
 const voiceStatus = document.getElementById('voiceStatus');
 const continuousListeningCheckbox = document.getElementById('continuousListening');
 
+// DOM Elements - Vision
+const cameraStream = document.getElementById('cameraStream');
+const cameraPlaceholder = document.getElementById('cameraPlaceholder');
+const visionAnalyzeBtn = document.getElementById('visionAnalyzeBtn');
+
 // State
 let currentAudioBlob = null;
 let quotes = [];
@@ -44,6 +49,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setupModeToggle();
     setupChatHandlers();
     setupVoiceRecognition();
+    setupVision();
 });
 
 // Character counter
@@ -479,5 +485,77 @@ function stopListening() {
 
     if (!isContinuousMode) {
         updateStatus('Voice input stopped', 'info');
+    }
+}
+
+// Vision Functions
+function setupVision() {
+    // Load camera stream when switching to chat mode
+    chatModeBtn.addEventListener('click', () => {
+        loadCameraStream();
+    });
+
+    // Vision analysis button
+    visionAnalyzeBtn.addEventListener('click', async () => {
+        await analyzeVision();
+    });
+
+    // Load camera stream if chat mode is already active
+    if (currentMode === 'chat') {
+        loadCameraStream();
+    }
+}
+
+function loadCameraStream() {
+    // Set camera stream source
+    cameraStream.src = `${API_BASE_URL}/api/vision/stream`;
+
+    // Show stream when loaded
+    cameraStream.onload = () => {
+        cameraStream.style.display = 'block';
+        cameraPlaceholder.style.display = 'none';
+    };
+
+    // Handle errors
+    cameraStream.onerror = () => {
+        cameraPlaceholder.textContent = 'Camera unavailable';
+        cameraStream.style.display = 'none';
+        cameraPlaceholder.style.display = 'block';
+    };
+}
+
+async function analyzeVision() {
+    try {
+        updateStatus('HAL is analyzing camera view...', 'processing');
+        activateEye(true);
+        visionAnalyzeBtn.disabled = true;
+
+        const response = await fetch(`${API_BASE_URL}/api/vision/analyze`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({})
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Vision analysis failed');
+        }
+
+        const data = await response.json();
+
+        // Add HAL's vision response to chat
+        addMessageToChat('hal', data.response, data.audio_id);
+
+        updateStatus('Vision analysis complete', 'success');
+
+    } catch (error) {
+        console.error('Error:', error);
+        updateStatus(`Error: ${error.message}`, 'error');
+        addMessageToChat('system', `Error: ${error.message}`);
+    } finally {
+        visionAnalyzeBtn.disabled = false;
+        activateEye(false);
     }
 }

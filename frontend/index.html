@@ -55,6 +55,19 @@
 
         <!-- Chat Panel -->
         <div class="chat-panel" id="chatPanel" style="display: none;">
+            <div class="vision-section">
+                <h3>Camera View</h3>
+                <div class="camera-container">
+                    <img id="cameraStream" src="" alt="Camera feed" style="display: none;">
+                    <div class="camera-placeholder" id="cameraPlaceholder">
+                        Camera initializing...
+                    </div>
+                </div>
+                <button id="visionAnalyzeBtn" class="btn btn-secondary">
+                    What do you see?
+                </button>
+            </div>
+
             <div class="chat-messages" id="chatMessages">
                 <div class="system-message">
                     HAL 9000 Conversational Interface Active
