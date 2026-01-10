@@ -41,6 +41,8 @@ let currentMode = 'tts';
 let recognition = null;
 let isListening = false;
 let isContinuousMode = false;
+let faceCheckInterval = null;
+let awaitingFaceRegistration = false;
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
@@ -493,6 +495,12 @@ function setupVision() {
     // Load camera stream when switching to chat mode
     chatModeBtn.addEventListener('click', () => {
         loadCameraStream();
+        startFaceChecking();
+    });
+
+    // Stop face checking when switching to TTS mode
+    ttsModeBtn.addEventListener('click', () => {
+        stopFaceChecking();
     });
 
     // Vision analysis button
@@ -503,6 +511,7 @@ function setupVision() {
     // Load camera stream if chat mode is already active
     if (currentMode === 'chat') {
         loadCameraStream();
+        startFaceChecking();
     }
 }
 
@@ -557,5 +566,140 @@ async function analyzeVision() {
     } finally {
         visionAnalyzeBtn.disabled = false;
         activateEye(false);
+    }
+}
+
+// Face Recognition Functions
+function startFaceChecking() {
+    // Check for unknown faces every 10 seconds
+    if (!faceCheckInterval) {
+        faceCheckInterval = setInterval(checkForUnknownFace, 10000);
+        console.log('Face checking started');
+    }
+}
+
+function stopFaceChecking() {
+    if (faceCheckInterval) {
+        clearInterval(faceCheckInterval);
+        faceCheckInterval = null;
+        console.log('Face checking stopped');
+    }
+}
+
+async function checkForUnknownFace() {
+    // Don't check if already in registration flow
+    if (awaitingFaceRegistration) return;
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/face/check`);
+        const data = await response.json();
+
+        if (data.unknown_face_detected) {
+            console.log('Unknown face detected!');
+            awaitingFaceRegistration = true;
+            await handleUnknownFace();
+        }
+    } catch (error) {
+        console.error('Error checking for unknown faces:', error);
+    }
+}
+
+async function handleUnknownFace() {
+    try {
+        // HAL announces the unknown face
+        const message = "I detect a new face. Would you like me to register it?";
+
+        // Synthesize HAL's question
+        const response = await fetch(`${API_BASE_URL}/api/synthesize`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ text: message })
+        });
+
+        if (response.ok) {
+            const audioBlob = await response.blob();
+            const audioUrl = URL.createObjectURL(audioBlob);
+            const audio = new Audio(audioUrl);
+            audio.play();
+        }
+
+        // Add to chat
+        addMessageToChat('hal', message, null);
+
+        // Show prompt with Yes/No buttons
+        const userResponse = confirm("HAL detected a new face. Would you like to register it?");
+
+        if (userResponse) {
+            // Ask for name
+            const name = prompt("Please enter the person's name:");
+
+            if (name && name.trim()) {
+                await registerNewFace(name.trim());
+            } else {
+                addMessageToChat('system', 'Face registration cancelled');
+                awaitingFaceRegistration = false;
+            }
+        } else {
+            addMessageToChat('system', 'Face registration declined');
+            awaitingFaceRegistration = false;
+        }
+
+    } catch (error) {
+        console.error('Error handling unknown face:', error);
+        awaitingFaceRegistration = false;
+    }
+}
+
+async function registerNewFace(name) {
+    try {
+        updateStatus('Registering face...', 'processing');
+        activateEye(true);
+
+        const response = await fetch(`${API_BASE_URL}/api/face/register`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ name: name })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Face registration failed');
+        }
+
+        const data = await response.json();
+
+        // HAL confirms registration
+        const confirmMessage = `Face registered as ${name}. I will remember this person.`;
+
+        // Synthesize confirmation
+        const ttsResponse = await fetch(`${API_BASE_URL}/api/synthesize`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ text: confirmMessage })
+        });
+
+        if (ttsResponse.ok) {
+            const audioBlob = await ttsResponse.blob();
+            const audioUrl = URL.createObjectURL(audioBlob);
+            const audio = new Audio(audioUrl);
+            audio.play();
+        }
+
+        addMessageToChat('hal', confirmMessage, null);
+        updateStatus(`Face registered successfully as ${name}`, 'success');
+
+    } catch (error) {
+        console.error('Error registering face:', error);
+        updateStatus(`Error: ${error.message}`, 'error');
+        addMessageToChat('system', `Error: ${error.message}`);
+    } finally {
+        activateEye(false);
+        awaitingFaceRegistration = false;
     }
 }

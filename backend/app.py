@@ -12,6 +12,7 @@ import pytz
 from ddgs import DDGS
 import time
 from vision_service import VisionService
+from face_recognition_service import FaceRecognitionService
 
 # Paths
 BASE_DIR = Path(__file__).parent.parent
@@ -40,6 +41,9 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 # Initialize vision service
 vision_service = VisionService()
 vision_service.start()
+
+# Initialize face recognition service
+face_service = FaceRecognitionService()
 
 @app.route('/health', methods=['GET'])
 def health_check():
@@ -438,6 +442,98 @@ def vision_analyze():
 
     except Exception as e:
         return jsonify({"error": f"Vision analysis failed: {str(e)}"}), 500
+
+@app.route('/api/face/check', methods=['GET'])
+def check_for_unknown_face():
+    """Check if there's an unknown face in the current camera view"""
+    try:
+        frame = vision_service.latest_frame
+        if frame is None:
+            return jsonify({"error": "No camera frame available"}), 500
+
+        has_unknown, face_encoding, face_location = face_service.has_unknown_face(frame)
+
+        if has_unknown:
+            # Store the face encoding temporarily for registration
+            # Convert numpy array to list for JSON
+            app.config['pending_face_encoding'] = face_encoding.tolist()
+
+            return jsonify({
+                "unknown_face_detected": True,
+                "location": face_location
+            })
+        else:
+            return jsonify({
+                "unknown_face_detected": False
+            })
+
+    except Exception as e:
+        return jsonify({"error": f"Face check failed: {str(e)}"}), 500
+
+@app.route('/api/face/register', methods=['POST'])
+def register_face():
+    """Register the pending unknown face with a name"""
+    try:
+        data = request.get_json()
+        name = data.get('name', '').strip()
+
+        if not name:
+            return jsonify({"error": "Name is required"}), 400
+
+        # Get the pending face encoding
+        face_encoding_list = app.config.get('pending_face_encoding')
+        if not face_encoding_list:
+            return jsonify({"error": "No pending face to register"}), 400
+
+        # Convert back to numpy array
+        import numpy as np
+        face_encoding = np.array(face_encoding_list)
+
+        # Register the face
+        face_service.register_face(face_encoding, name)
+
+        # Clear the pending face
+        app.config['pending_face_encoding'] = None
+
+        return jsonify({
+            "success": True,
+            "message": f"Face registered as {name}",
+            "known_faces": face_service.get_known_names()
+        })
+
+    except Exception as e:
+        return jsonify({"error": f"Face registration failed: {str(e)}"}), 500
+
+@app.route('/api/face/recognize', methods=['GET'])
+def recognize_faces():
+    """Recognize all faces in the current camera view"""
+    try:
+        frame = vision_service.latest_frame
+        if frame is None:
+            return jsonify({"error": "No camera frame available"}), 500
+
+        results = face_service.recognize_faces(frame)
+
+        faces = [
+            {
+                "name": name,
+                "location": {
+                    "top": location[0],
+                    "right": location[1],
+                    "bottom": location[2],
+                    "left": location[3]
+                }
+            }
+            for name, location in results
+        ]
+
+        return jsonify({
+            "faces": faces,
+            "count": len(faces)
+        })
+
+    except Exception as e:
+        return jsonify({"error": f"Face recognition failed: {str(e)}"}), 500
 
 if __name__ == '__main__':
     if not MODEL_PATH.exists():
