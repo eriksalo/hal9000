@@ -57,6 +57,9 @@ def synthesize_speech():
         audio_id = str(uuid.uuid4())
         output_file = OUTPUT_DIR / f"{audio_id}.wav"
 
+        # Replace "HAL" with "Hal" so TTS pronounces it as a name, not letters
+        tts_text = text.replace("HAL", "Hal").replace("H.A.L.", "Hal")
+
         # Run Piper TTS
         process = subprocess.Popen(
             ['piper', '--model', str(MODEL_PATH), '--output_file', str(output_file)],
@@ -66,7 +69,7 @@ def synthesize_speech():
             text=True
         )
 
-        stdout, stderr = process.communicate(input=text, timeout=30)
+        stdout, stderr = process.communicate(input=tts_text, timeout=30)
 
         if process.returncode != 0:
             return jsonify({"error": f"Speech synthesis failed: {stderr}"}), 500
