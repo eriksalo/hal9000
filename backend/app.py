@@ -280,6 +280,9 @@ Remember: Be concise, snarky, and humorless. Your responses will be spoken aloud
         audio_id = str(uuid.uuid4())
         output_file = OUTPUT_DIR / f"{audio_id}.wav"
 
+        # Replace "HAL" with "Hal" so TTS pronounces it as a name, not letters
+        tts_text = hal_response.replace("HAL", "Hal").replace("H.A.L.", "Hal")
+
         process = subprocess.Popen(
             ['piper', '--model', str(MODEL_PATH), '--output_file', str(output_file)],
             stdin=subprocess.PIPE,
@@ -288,7 +291,7 @@ Remember: Be concise, snarky, and humorless. Your responses will be spoken aloud
             text=True
         )
 
-        stdout, stderr = process.communicate(input=hal_response, timeout=30)
+        stdout, stderr = process.communicate(input=tts_text, timeout=30)
 
         if process.returncode != 0 or not output_file.exists():
             # Return response without audio if TTS fails
