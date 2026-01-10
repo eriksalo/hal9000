@@ -1,4 +1,4 @@
-from flask import Flask, request, send_file, jsonify
+from flask import Flask, request, send_file, jsonify, Response
 from flask_cors import CORS
 import subprocess
 import os
@@ -10,6 +10,8 @@ from anthropic import Anthropic
 from datetime import datetime
 import pytz
 from ddgs import DDGS
+import time
+from vision_service import VisionService
 
 # Paths
 BASE_DIR = Path(__file__).parent.parent
@@ -34,6 +36,10 @@ OUTPUT_DIR = BASE_DIR / "hal_9000_outputs"
 
 # Ensure output directory exists
 OUTPUT_DIR.mkdir(exist_ok=True)
+
+# Initialize vision service
+vision_service = VisionService()
+vision_service.start()
 
 @app.route('/health', methods=['GET'])
 def health_check():
@@ -349,6 +355,89 @@ def get_audio(audio_id):
         return jsonify({"error": "Invalid audio ID"}), 400
     except Exception as e:
         return jsonify({"error": f"An error occurred: {str(e)}"}), 500
+
+@app.route('/api/vision/stream', methods=['GET'])
+def vision_stream():
+    """Stream camera feed as MJPEG"""
+    def generate():
+        while True:
+            frame = vision_service.get_jpeg_frame()
+            if frame:
+                yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+            time.sleep(0.1)
+
+    return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+@app.route('/api/vision/analyze', methods=['POST'])
+def vision_analyze():
+    """Analyze current camera view using Claude Vision API"""
+    if not anthropic_client:
+        return jsonify({"error": "Vision analysis requires Claude API"}), 503
+
+    try:
+        # Get current frame as base64
+        image_base64 = vision_service.get_frame_base64()
+        if not image_base64:
+            return jsonify({"error": "No camera frame available"}), 500
+
+        # Get user prompt (optional)
+        data = request.get_json() or {}
+        user_prompt = data.get('prompt', 'What do you see? Describe it briefly in 1-2 sentences.')
+
+        # Ask Claude to analyze the image
+        response = anthropic_client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=150,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/jpeg",
+                            "data": image_base64
+                        }
+                    },
+                    {
+                        "type": "text",
+                        "text": user_prompt
+                    }
+                ]
+            }]
+        )
+
+        vision_response = response.content[0].text.strip()
+
+        # Synthesize HAL's response
+        audio_id = str(uuid.uuid4())
+        output_file = OUTPUT_DIR / f"{audio_id}.wav"
+        tts_text = vision_response.replace("HAL", "Hal").replace("H.A.L.", "Hal")
+
+        process = subprocess.Popen(
+            ['piper', '--model', str(MODEL_PATH), '--output_file', str(output_file)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+
+        stdout, stderr = process.communicate(input=tts_text, timeout=30)
+
+        if process.returncode != 0 or not output_file.exists():
+            return jsonify({
+                "response": vision_response,
+                "audio_id": None
+            }), 200
+
+        return jsonify({
+            "response": vision_response,
+            "audio_id": audio_id
+        })
+
+    except Exception as e:
+        return jsonify({"error": f"Vision analysis failed: {str(e)}"}), 500
 
 if __name__ == '__main__':
     if not MODEL_PATH.exists():
