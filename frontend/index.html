@@ -17,9 +17,15 @@
         <h1 class="title">HAL 9000</h1>
         <p class="subtitle">Voice Synthesis System</p>
 
+        <div class="mode-toggle">
+            <button id="ttsMode" class="mode-btn active">TTS Mode</button>
+            <button id="chatMode" class="mode-btn">Chat Mode</button>
+        </div>
+
         <div class="status" id="status">System Ready</div>
 
-        <div class="main-panel">
+        <!-- TTS Panel -->
+        <div class="main-panel" id="ttsPanel">
             <textarea
                 id="textInput"
                 placeholder="Enter text for HAL to speak..."
@@ -43,6 +49,32 @@
                 <audio id="audioPlayer" controls></audio>
                 <button id="downloadBtn" class="btn btn-download">
                     Download Audio
+                </button>
+            </div>
+        </div>
+
+        <!-- Chat Panel -->
+        <div class="chat-panel" id="chatPanel" style="display: none;">
+            <div class="chat-messages" id="chatMessages">
+                <div class="system-message">
+                    HAL 9000 Conversational Interface Active
+                </div>
+            </div>
+
+            <div class="chat-input-container">
+                <input
+                    type="text"
+                    id="chatInput"
+                    placeholder="Ask HAL a question..."
+                    maxlength="500"
+                />
+                <button id="sendBtn" class="btn btn-primary">
+                    Send
+                </button>
+            </div>
+            <div class="chat-controls">
+                <button id="clearChatBtn" class="btn btn-secondary">
+                    Clear Conversation
                 </button>
             </div>
         </div>

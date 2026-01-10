@@ -1,7 +1,7 @@
 // Configuration
 const API_BASE_URL = 'http://localhost:5000';
 
-// DOM Elements
+// DOM Elements - TTS Mode
 const textInput = document.getElementById('textInput');
 const charCount = document.getElementById('charCount');
 const synthesizeBtn = document.getElementById('synthesizeBtn');
@@ -13,14 +13,30 @@ const status = document.getElementById('status');
 const quotesList = document.getElementById('quotesList');
 const halEye = document.getElementById('halEye');
 
+// DOM Elements - Mode Toggle
+const ttsModeBtn = document.getElementById('ttsMode');
+const chatModeBtn = document.getElementById('chatMode');
+const ttsPanel = document.getElementById('ttsPanel');
+const chatPanel = document.getElementById('chatPanel');
+
+// DOM Elements - Chat Mode
+const chatMessages = document.getElementById('chatMessages');
+const chatInput = document.getElementById('chatInput');
+const sendBtn = document.getElementById('sendBtn');
+const clearChatBtn = document.getElementById('clearChatBtn');
+
 // State
 let currentAudioBlob = null;
 let quotes = [];
+let conversationHistory = [];
+let currentMode = 'tts';
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
     loadQuotes();
     checkBackendHealth();
+    setupModeToggle();
+    setupChatHandlers();
 });
 
 // Character counter
@@ -178,4 +194,146 @@ function activateEye(active) {
     } else {
         halEye.classList.remove('active');
     }
+}
+
+// Mode Toggle Functions
+function setupModeToggle() {
+    ttsModeBtn.addEventListener('click', () => {
+        currentMode = 'tts';
+        ttsModeBtn.classList.add('active');
+        chatModeBtn.classList.remove('active');
+        ttsPanel.style.display = 'block';
+        chatPanel.style.display = 'none';
+        updateStatus('TTS Mode active', 'info');
+    });
+
+    chatModeBtn.addEventListener('click', () => {
+        currentMode = 'chat';
+        chatModeBtn.classList.add('active');
+        ttsModeBtn.classList.remove('active');
+        chatPanel.style.display = 'block';
+        ttsPanel.style.display = 'none';
+        updateStatus('Chat Mode active - Ask HAL anything', 'info');
+    });
+}
+
+// Chat Functions
+function setupChatHandlers() {
+    sendBtn.addEventListener('click', () => sendChatMessage());
+
+    chatInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            sendChatMessage();
+        }
+    });
+
+    clearChatBtn.addEventListener('click', () => {
+        conversationHistory = [];
+        chatMessages.innerHTML = '<div class="system-message">Conversation cleared. HAL 9000 ready.</div>';
+        updateStatus('Conversation history cleared', 'success');
+    });
+}
+
+async function sendChatMessage() {
+    const message = chatInput.value.trim();
+
+    if (!message) {
+        updateStatus('Please enter a message', 'error');
+        return;
+    }
+
+    // Disable input while processing
+    chatInput.disabled = true;
+    sendBtn.disabled = true;
+    activateEye(true);
+    updateStatus('HAL is processing your query...', 'processing');
+
+    // Add user message to chat
+    addMessageToChat('user', message);
+
+    // Clear input
+    chatInput.value = '';
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/chat`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                message: message,
+                history: conversationHistory
+            }),
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Chat request failed');
+        }
+
+        const data = await response.json();
+
+        // Add HAL's response to chat
+        addMessageToChat('hal', data.response, data.audio_id);
+
+        // Update conversation history
+        conversationHistory.push({
+            role: 'user',
+            content: message
+        });
+        conversationHistory.push({
+            role: 'assistant',
+            content: data.response
+        });
+
+        updateStatus('HAL has responded', 'success');
+
+    } catch (error) {
+        console.error('Error:', error);
+        updateStatus(`Error: ${error.message}`, 'error');
+        addMessageToChat('system', `Error: ${error.message}`);
+    } finally {
+        chatInput.disabled = false;
+        sendBtn.disabled = false;
+        activateEye(false);
+        chatInput.focus();
+    }
+}
+
+function addMessageToChat(type, content, audioId = null) {
+    const messageDiv = document.createElement('div');
+
+    if (type === 'user') {
+        messageDiv.className = 'message user-message';
+        messageDiv.innerHTML = `
+            <div class="message-header">YOU</div>
+            <div class="message-content">${escapeHtml(content)}</div>
+        `;
+    } else if (type === 'hal') {
+        messageDiv.className = 'message hal-message';
+        messageDiv.innerHTML = `
+            <div class="message-header">HAL 9000</div>
+            <div class="message-content">${escapeHtml(content)}</div>
+            ${audioId ? `
+                <div class="message-audio">
+                    <audio controls autoplay>
+                        <source src="${API_BASE_URL}/api/audio/${audioId}" type="audio/wav">
+                    </audio>
+                </div>
+            ` : ''}
+        `;
+    } else if (type === 'system') {
+        messageDiv.className = 'system-message';
+        messageDiv.textContent = content;
+    }
+
+    chatMessages.appendChild(messageDiv);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }
