@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HAL 9000 - Voice Synthesizer</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <div class="hal-eye-container">
+            <div class="hal-eye" id="halEye">
+                <div class="eye-inner"></div>
+            </div>
+        </div>
+
+        <h1 class="title">HAL 9000</h1>
+        <p class="subtitle">Voice Synthesis System</p>
+
+        <div class="status" id="status">System Ready</div>
+
+        <div class="main-panel">
+            <textarea
+                id="textInput"
+                placeholder="Enter text for HAL to speak..."
+                maxlength="1000"
+            ></textarea>
+
+            <div class="char-counter">
+                <span id="charCount">0</span> / 1000 characters
+            </div>
+
+            <div class="button-group">
+                <button id="synthesizeBtn" class="btn btn-primary">
+                    <span class="btn-text">Synthesize Speech</span>
+                </button>
+                <button id="randomQuoteBtn" class="btn btn-secondary">
+                    Random Quote
+                </button>
+            </div>
+
+            <div class="audio-player" id="audioPlayerContainer" style="display: none;">
+                <audio id="audioPlayer" controls></audio>
+                <button id="downloadBtn" class="btn btn-download">
+                    Download Audio
+                </button>
+            </div>
+        </div>
+
+        <div class="quotes-section">
+            <h3>Famous HAL 9000 Quotes</h3>
+            <div id="quotesList" class="quotes-list">
+                <!-- Quotes will be loaded here -->
+            </div>
+        </div>
+
+        <footer>
+            <p>HAL 9000 TTS powered by <a href="https://huggingface.co/campwill/HAL-9000-Piper-TTS" target="_blank">Piper TTS</a></p>
+        </footer>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
