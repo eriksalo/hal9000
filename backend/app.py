@@ -35,8 +35,22 @@ else:
 MODEL_PATH = BASE_DIR / "hal_9000_model" / "hal.onnx"
 OUTPUT_DIR = BASE_DIR / "hal_9000_outputs"
 
+# Audio output device (USB speaker)
+AUDIO_DEVICE = "plughw:3,0"  # card 3, device 0 (UACDemoV1.0)
+
 # Ensure output directory exists
 OUTPUT_DIR.mkdir(exist_ok=True)
+
+def play_audio_local(audio_file):
+    """Play audio through the local USB speaker"""
+    try:
+        subprocess.Popen(
+            ['aplay', '-D', AUDIO_DEVICE, str(audio_file)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+    except Exception as e:
+        print(f"Error playing audio locally: {e}")
 
 # Initialize vision service
 vision_service = VisionService()
@@ -86,6 +100,9 @@ def synthesize_speech():
 
         if not output_file.exists():
             return jsonify({"error": "Audio file was not generated"}), 500
+
+        # Play audio through local USB speaker
+        play_audio_local(output_file)
 
         return send_file(
             output_file,
@@ -330,6 +347,9 @@ Remember: Be concise, snarky, and humorless. Use famous quotes when they fit nat
                 "error": "Speech synthesis failed"
             }), 200
 
+        # Play audio through local USB speaker
+        play_audio_local(output_file)
+
         return jsonify({
             "response": hal_response,
             "audio_id": audio_id
@@ -434,6 +454,9 @@ def vision_analyze():
                 "response": vision_response,
                 "audio_id": None
             }), 200
+
+        # Play audio through local USB speaker
+        play_audio_local(output_file)
 
         return jsonify({
             "response": vision_response,
