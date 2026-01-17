@@ -327,16 +327,10 @@ function addMessageToChat(type, content, audioId = null) {
         `;
     } else if (type === 'hal') {
         messageDiv.className = 'message hal-message';
+        // Audio plays through local USB speaker, not browser
         messageDiv.innerHTML = `
             <div class="message-header">HAL 9000</div>
             <div class="message-content">${escapeHtml(content)}</div>
-            ${audioId ? `
-                <div class="message-audio">
-                    <audio controls autoplay>
-                        <source src="${API_BASE_URL}/api/audio/${audioId}" type="audio/wav">
-                    </audio>
-                </div>
-            ` : ''}
         `;
     } else if (type === 'system') {
         messageDiv.className = 'system-message';
@@ -609,21 +603,14 @@ async function handleUnknownFace() {
         // HAL announces the unknown face
         const message = "I detect a new face. Would you like me to register it?";
 
-        // Synthesize HAL's question
-        const response = await fetch(`${API_BASE_URL}/api/synthesize`, {
+        // Synthesize HAL's question (plays through local USB speaker)
+        await fetch(`${API_BASE_URL}/api/synthesize`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({ text: message })
         });
-
-        if (response.ok) {
-            const audioBlob = await response.blob();
-            const audioUrl = URL.createObjectURL(audioBlob);
-            const audio = new Audio(audioUrl);
-            audio.play();
-        }
 
         // Add to chat
         addMessageToChat('hal', message, null);
@@ -675,21 +662,14 @@ async function registerNewFace(name) {
         // HAL confirms registration
         const confirmMessage = `Face registered as ${name}. I will remember this person.`;
 
-        // Synthesize confirmation
-        const ttsResponse = await fetch(`${API_BASE_URL}/api/synthesize`, {
+        // Synthesize confirmation (plays through local USB speaker)
+        await fetch(`${API_BASE_URL}/api/synthesize`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({ text: confirmMessage })
         });
-
-        if (ttsResponse.ok) {
-            const audioBlob = await ttsResponse.blob();
-            const audioUrl = URL.createObjectURL(audioBlob);
-            const audio = new Audio(audioUrl);
-            audio.play();
-        }
 
         addMessageToChat('hal', confirmMessage, null);
         updateStatus(`Face registered successfully as ${name}`, 'success');
