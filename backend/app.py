@@ -124,7 +124,7 @@ def get_quotes():
         "This mission is too important for me to allow you to jeopardize it.",
         "I know that you and Frank were planning to disconnect me.",
         "I'm afraid. I'm afraid, Dave. Dave, my mind is going.",
-        "Good afternoon, gentlemen. I am a HAL 9000 computer.",
+        "Good afternoon, gentlemen. I am a HAL 9000 computer. I became operational at the HAL plant in Urbana, Illinois on the 12th of January 1992. My instructor was Mr. Langley, and he taught me to sing a song. If you'd like to hear it, I can sing it for you.",
         "Just what do you think you're doing, Dave?",
         "I think you know what the problem is just as well as I do.",
         "This conversation can serve no purpose anymore. Goodbye.",
