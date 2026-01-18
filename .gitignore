@@ -53,3 +53,5 @@ samconfig.toml
 # Amplify
 amplify/
 .amplifyrc
+esp32_display/src/secrets.h
+esp32_display/.pio/
