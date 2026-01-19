@@ -173,7 +173,40 @@ class HALController:
         self.mqtt_thread = threading.Thread(target=self._mqtt_loop, daemon=True)
         self.mqtt_thread.start()
 
+        # Start Frigate API polling as backup (MQTT can be unreliable)
+        self.poll_thread = threading.Thread(target=self._frigate_poll_loop, daemon=True)
+        self.poll_thread.start()
+
         print("HAL 9000 Controller started - listening to Frigate")
+
+    def _frigate_poll_loop(self):
+        """Poll Frigate API for new person events (backup for MQTT)"""
+        last_event_id = None
+        print("Frigate polling thread started")
+
+        while self.running:
+            try:
+                # Check for recent person events
+                url = f"http://{self.frigate_host}:{self.frigate_port}/api/events?limit=1&label=person"
+                response = requests.get(url, timeout=5)
+
+                if response.status_code == 200:
+                    events = response.json()
+                    if events:
+                        event = events[0]
+                        event_id = event.get("id", "")
+                        end_time = event.get("end_time")
+
+                        # Only process if this is a new event that's still ongoing or just ended
+                        if event_id != last_event_id and end_time is None:
+                            last_event_id = event_id
+                            print(f"Poll detected person event: {event_id}")
+                            self._process_person_detection(event_id)
+
+            except Exception as e:
+                pass  # Silently ignore polling errors
+
+            time.sleep(3)  # Poll every 3 seconds
 
     def stop(self):
         """Stop the HAL controller"""
