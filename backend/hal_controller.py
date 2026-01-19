@@ -83,7 +83,7 @@ class HALController:
         # Audio devices - use card names for reliability
         self.audio_output_device = "plughw:CARD=UACDemoV10,DEV=0"  # USB speaker
         self.audio_input_device = "plughw:CARD=CMTECK,DEV=0"  # CMTECK USB microphone
-        self.mic_gain = 10  # Amplification for CMTECK mic
+        self.mic_gain = 15  # Amplification for CMTECK mic
 
         # Frigate settings
         self.frigate_host = "localhost"
