@@ -1,4 +1,4 @@
-from flask import Flask, request, send_file, jsonify, Response
+from flask import Flask, request, send_file, jsonify, Response, render_template
 from flask_cors import CORS
 import subprocess
 import os
@@ -11,6 +11,9 @@ from datetime import datetime
 import pytz
 from ddgs import DDGS
 import time
+import threading
+import requests
+from collections import deque
 from vision_service import VisionService
 from face_recognition_service import FaceRecognitionService
 
@@ -393,6 +396,19 @@ def vision_stream():
 
     return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
+@app.route('/api/vision/frame', methods=['GET'])
+def vision_frame():
+    """Get single camera frame as JPEG (for ESP32 display)"""
+    # Get optional size parameter (default 480 for round display)
+    size = request.args.get('size', 480, type=int)
+    size = min(max(size, 64), 1280)  # Clamp between 64 and 1280
+
+    frame = vision_service.get_sized_jpeg_frame(size)
+    if frame:
+        return Response(frame, mimetype='image/jpeg')
+    else:
+        return jsonify({"error": "No camera frame available"}), 500
+
 @app.route('/api/vision/analyze', methods=['POST'])
 def vision_analyze():
     """Analyze current camera view using Claude Vision API"""
@@ -558,12 +574,237 @@ def recognize_faces():
     except Exception as e:
         return jsonify({"error": f"Face recognition failed: {str(e)}"}), 500
 
+@app.route('/api/hal/status', methods=['GET'])
+def hal_status():
+    """Get HAL controller status for ESP32"""
+    from hal_controller import get_controller
+    controller = get_controller()
+
+    # Track ESP32 connection
+    client_ip = request.remote_addr
+    if client_ip and client_ip != '127.0.0.1':
+        set_esp32_seen(client_ip)
+
+    return jsonify(controller.get_status())
+
+@app.route('/api/hal/register', methods=['POST'])
+def hal_register_name():
+    """Register a name for the pending unknown face"""
+    from hal_controller import get_controller
+    controller = get_controller()
+
+    data = request.get_json()
+    name = data.get('name', '').strip()
+
+    if not name:
+        return jsonify({"error": "Name is required"}), 400
+
+    success = controller.register_name(name)
+    if success:
+        return jsonify({"success": True, "message": f"Registered {name}"})
+    else:
+        return jsonify({"error": "No pending face to register"}), 400
+
+@app.route('/api/hal/speak', methods=['POST'])
+def hal_speak():
+    """Make HAL speak a message"""
+    from hal_controller import get_controller
+    controller = get_controller()
+
+    data = request.get_json()
+    text = data.get('text', '').strip()
+
+    if not text:
+        return jsonify({"error": "Text is required"}), 400
+
+    controller._speak(text)
+    return jsonify({"success": True})
+
+# ============== DEBUG DASHBOARD ==============
+
+# Debug state storage
+debug_state = {
+    'events': deque(maxlen=100),
+    'last_tts': '',
+    'last_transcription': '',
+    'audio_level': 0,
+    'last_face': None,
+    'face_status': '',
+    'esp32_connected': False,
+    'esp32_ip': None,
+    'esp32_last_seen': None
+}
+debug_lock = threading.Lock()
+
+def add_debug_event(message, event_type='mqtt'):
+    """Add an event to the debug log"""
+    with debug_lock:
+        debug_state['events'].append({
+            'message': message,
+            'type': event_type,
+            'time': datetime.now().isoformat()
+        })
+
+def set_debug_tts(text):
+    """Record TTS output for debug"""
+    with debug_lock:
+        debug_state['last_tts'] = text
+        add_debug_event(f'TTS: "{text}"', 'tts')
+
+def set_debug_transcription(text):
+    """Record transcription for debug"""
+    with debug_lock:
+        debug_state['last_transcription'] = text
+        add_debug_event(f'STT: "{text}"', 'stt')
+
+def set_debug_audio_level(level):
+    """Record audio level for debug"""
+    with debug_lock:
+        debug_state['audio_level'] = level
+
+def set_debug_face(name, status):
+    """Record face recognition for debug"""
+    with debug_lock:
+        debug_state['last_face'] = name
+        debug_state['face_status'] = status
+        add_debug_event(f'Face: {name} ({status})', 'face')
+
+def set_esp32_seen(ip_address):
+    """Record ESP32 connection for debug"""
+    with debug_lock:
+        debug_state['esp32_connected'] = True
+        debug_state['esp32_ip'] = ip_address
+        debug_state['esp32_last_seen'] = datetime.now().strftime('%H:%M:%S')
+
+@app.route('/debug')
+def debug_dashboard():
+    """Serve debug dashboard HTML"""
+    return render_template('debug.html')
+
+@app.route('/api/debug/status')
+def debug_status():
+    """Get current debug status"""
+    from hal_controller import get_controller
+    controller = get_controller()
+
+    with debug_lock:
+        # Check if ESP32 is still connected (last seen within 10 seconds)
+        esp32_connected = debug_state['esp32_connected']
+        if debug_state['esp32_last_seen']:
+            try:
+                last_seen = datetime.strptime(debug_state['esp32_last_seen'], '%H:%M:%S')
+                now = datetime.now()
+                last_seen = last_seen.replace(year=now.year, month=now.month, day=now.day)
+                if (now - last_seen).total_seconds() > 10:
+                    esp32_connected = False
+            except:
+                pass
+
+        return jsonify({
+            'mqtt_connected': controller.mqtt_client.is_connected() if controller.mqtt_client else False,
+            'state': controller.current_state,
+            'last_face': debug_state['last_face'],
+            'face_status': debug_state['face_status'],
+            'known_faces': controller.face_service.get_known_names(),
+            'last_tts': debug_state['last_tts'],
+            'last_transcription': debug_state['last_transcription'],
+            'audio_level': debug_state['audio_level'],
+            'esp32_connected': esp32_connected,
+            'esp32_ip': debug_state['esp32_ip'],
+            'esp32_last_seen': debug_state['esp32_last_seen']
+        })
+
+@app.route('/api/debug/events')
+def debug_events():
+    """Get recent debug events"""
+    with debug_lock:
+        # Get events since last poll (return all and clear)
+        events = list(debug_state['events'])
+        debug_state['events'].clear()
+        return jsonify({'events': events})
+
+@app.route('/api/debug/camera')
+def debug_camera():
+    """Get current camera frame from Frigate"""
+    try:
+        # Get frame from Frigate
+        response = requests.get('http://localhost:5001/api/hal_camera/latest.jpg', timeout=2)
+        if response.status_code == 200:
+            return Response(response.content, mimetype='image/jpeg')
+    except:
+        pass
+
+    # Fallback to vision service if Frigate unavailable
+    frame = vision_service.get_jpeg_frame()
+    if frame:
+        return Response(frame, mimetype='image/jpeg')
+
+    # Return placeholder
+    return jsonify({'error': 'No camera available'}), 500
+
+@app.route('/api/debug/snapshot')
+def debug_snapshot():
+    """Get latest face detection snapshot"""
+    from hal_controller import get_controller
+    controller = get_controller()
+
+    snapshot = controller.get_latest_snapshot()
+    if snapshot:
+        return Response(snapshot, mimetype='image/jpeg')
+
+    return jsonify({'error': 'No snapshot available'}), 404
+
+@app.route('/api/debug/test_mic')
+def debug_test_mic():
+    """Test microphone by recording a short sample"""
+    import numpy as np
+    import wave
+
+    try:
+        from hal_controller import get_controller
+        controller = get_controller()
+
+        # Record 2 seconds
+        test_file = '/tmp/mic_debug_test.wav'
+        result = subprocess.run([
+            'arecord', '-D', controller.audio_input_device,
+            '-f', 'S16_LE', '-r', '16000', '-c', '1', '-d', '2',
+            test_file
+        ], capture_output=True, timeout=5)
+
+        if os.path.exists(test_file):
+            wf = wave.open(test_file, 'rb')
+            frames = wf.readframes(wf.getnframes())
+            audio = np.frombuffer(frames, dtype=np.int16)
+            wf.close()
+
+            max_amp = int(np.max(np.abs(audio)))
+            mean_amp = float(np.mean(np.abs(audio)))
+
+            return jsonify({
+                'success': True,
+                'max_amplitude': max_amp,
+                'mean_amplitude': mean_amp,
+                'device': controller.audio_input_device
+            })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+    return jsonify({'error': 'Recording failed'}), 500
+
+# ============== END DEBUG DASHBOARD ==============
+
 if __name__ == '__main__':
     if not MODEL_PATH.exists():
         print(f"ERROR: Model file not found at {MODEL_PATH}")
         print("Please ensure the HAL-9000 model is downloaded to hal_9000_model/")
         exit(1)
 
+    # Start HAL controller
+    from hal_controller import get_controller
+    controller = get_controller()
+    controller.start()
+
     print("HAL 9000 TTS Server starting...")
     print(f"Model loaded from: {MODEL_PATH}")
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=8080, debug=False, threaded=True)
