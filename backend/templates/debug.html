@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HAL 9000 Debug Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Courier New', monospace;
+            background: #1a1a1a;
+            color: #00ff00;
+            padding: 20px;
+        }
+        h1 {
+            text-align: center;
+            color: #ff0000;
+            margin-bottom: 20px;
+            text-shadow: 0 0 10px #ff0000;
+        }
+        .dashboard {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        .panel {
+            background: #2a2a2a;
+            border: 1px solid #444;
+            border-radius: 8px;
+            padding: 15px;
+        }
+        .panel h2 {
+            color: #ffaa00;
+            margin-bottom: 10px;
+            font-size: 14px;
+            text-transform: uppercase;
+            border-bottom: 1px solid #444;
+            padding-bottom: 5px;
+        }
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        .status-connected { background: #00ff00; box-shadow: 0 0 5px #00ff00; }
+        .status-disconnected { background: #ff0000; box-shadow: 0 0 5px #ff0000; }
+        .status-unknown { background: #888; }
+
+        #video-feed {
+            width: 100%;
+            max-height: 300px;
+            background: #000;
+            border-radius: 4px;
+        }
+        #video-feed img {
+            width: 100%;
+            height: auto;
+        }
+
+        .log-box {
+            background: #111;
+            border: 1px solid #333;
+            border-radius: 4px;
+            padding: 10px;
+            height: 150px;
+            overflow-y: auto;
+            font-size: 12px;
+        }
+        .log-entry {
+            margin: 2px 0;
+            padding: 2px 5px;
+        }
+        .log-entry.mqtt { color: #00ffff; }
+        .log-entry.tts { color: #ff00ff; }
+        .log-entry.stt { color: #ffff00; }
+        .log-entry.face { color: #00ff00; }
+        .log-entry.error { color: #ff0000; }
+
+        .audio-meter {
+            height: 30px;
+            background: #111;
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        .audio-level {
+            height: 100%;
+            background: linear-gradient(90deg, #00ff00, #ffff00, #ff0000);
+            width: 0%;
+            transition: width 0.1s;
+        }
+
+        #audio-chart {
+            height: 150px !important;
+        }
+
+        .face-result {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-top: 10px;
+        }
+        #face-snapshot {
+            width: 120px;
+            height: 120px;
+            background: #000;
+            border-radius: 4px;
+            object-fit: cover;
+        }
+        .face-info {
+            flex: 1;
+        }
+        .face-name {
+            font-size: 24px;
+            color: #00ffff;
+        }
+        .face-status {
+            color: #888;
+            font-size: 12px;
+        }
+
+        .state-machine {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 10px;
+        }
+        .state {
+            padding: 5px 10px;
+            background: #333;
+            border-radius: 4px;
+            font-size: 11px;
+        }
+        .state.active {
+            background: #ff0000;
+            color: #fff;
+            box-shadow: 0 0 10px #ff0000;
+        }
+
+        .transcription {
+            background: #111;
+            padding: 15px;
+            border-radius: 4px;
+            min-height: 60px;
+            margin-top: 10px;
+        }
+        .transcription-text {
+            font-size: 18px;
+            color: #ffff00;
+        }
+        .transcription-label {
+            font-size: 10px;
+            color: #666;
+            margin-bottom: 5px;
+        }
+
+        .tts-output {
+            background: #111;
+            padding: 15px;
+            border-radius: 4px;
+            min-height: 60px;
+        }
+        .tts-text {
+            font-size: 16px;
+            color: #ff00ff;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <h1>HAL 9000 DEBUG DASHBOARD</h1>
+
+    <div class="dashboard">
+        <!-- MQTT Status -->
+        <div class="panel">
+            <h2>MQTT Status</h2>
+            <p>
+                <span id="mqtt-status" class="status-indicator status-unknown"></span>
+                <span id="mqtt-status-text">Checking...</span>
+            </p>
+            <div class="log-box" id="mqtt-log"></div>
+        </div>
+
+        <!-- Video Feed -->
+        <div class="panel">
+            <h2>Camera Feed (Frigate)</h2>
+            <div id="video-feed">
+                <img id="camera-img" src="" alt="Camera Feed">
+            </div>
+        </div>
+
+        <!-- Audio Input -->
+        <div class="panel">
+            <h2>Microphone Input</h2>
+            <div class="audio-meter">
+                <div class="audio-level" id="audio-level"></div>
+            </div>
+            <p>Level: <span id="audio-level-text">0</span> / 32767</p>
+            <canvas id="audio-chart"></canvas>
+            <div class="transcription">
+                <div class="transcription-label">TRANSCRIPTION:</div>
+                <div class="transcription-text" id="transcription-text">--</div>
+            </div>
+        </div>
+
+        <!-- Voice Output -->
+        <div class="panel">
+            <h2>Voice Output (TTS)</h2>
+            <div class="tts-output">
+                <div class="tts-text" id="tts-text">--</div>
+            </div>
+            <h2 style="margin-top: 15px;">System State</h2>
+            <div class="state-machine">
+                <span class="state" data-state="idle">IDLE</span>
+                <span class="state" data-state="asking_remember">ASKING_REMEMBER</span>
+                <span class="state" data-state="awaiting_yes_no">AWAITING_YES_NO</span>
+                <span class="state" data-state="asking_name">ASKING_NAME</span>
+                <span class="state" data-state="awaiting_name">AWAITING_NAME</span>
+                <span class="state" data-state="confirming">CONFIRMING</span>
+            </div>
+        </div>
+
+        <!-- Face Recognition -->
+        <div class="panel">
+            <h2>Face Recognition</h2>
+            <div class="face-result">
+                <img id="face-snapshot" src="" alt="Face Snapshot">
+                <div class="face-info">
+                    <div class="face-name" id="face-name">No face detected</div>
+                    <div class="face-status" id="face-status">Waiting for detection...</div>
+                    <div style="margin-top: 10px;">
+                        <strong>Known Faces:</strong> <span id="known-faces">--</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ESP32 Display -->
+        <div class="panel">
+            <h2>ESP32 Display Output</h2>
+            <div style="display: flex; align-items: center; gap: 20px;">
+                <!-- Round display simulation matching actual ESP32 -->
+                <div id="esp32-display" style="width: 150px; height: 150px; background: #000; border-radius: 50%; position: relative; overflow: hidden;">
+                    <!-- Outer glow (pulsing) -->
+                    <div id="esp32-outer-glow" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 95px; height: 95px; background: #400000; border-radius: 50%;"></div>
+                    <!-- Main eye -->
+                    <div id="esp32-main-eye" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 65px; height: 65px; background: #c80000; border-radius: 50%; border: 2px solid #f80000;"></div>
+                    <!-- Yellow center -->
+                    <div id="esp32-yellow" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 20px; height: 20px; background: #ffe000; border-radius: 50%;"></div>
+                    <!-- White center -->
+                    <div id="esp32-white" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 10px; height: 10px; background: #ffffff; border-radius: 50%;"></div>
+                    <!-- Status text at bottom -->
+                    <div id="esp32-display-text" style="position: absolute; bottom: 8px; left: 0; right: 0; text-align: center; font-size: 9px; color: #c80000; font-family: sans-serif;">HAL 9000 Online</div>
+                </div>
+                <div class="esp32-info">
+                    <p><strong>Status:</strong> <span id="esp32-status" style="color: #00ff00;">--</span></p>
+                    <p><strong>IP:</strong> <span id="esp32-ip">--</span></p>
+                    <p><strong>Last Seen:</strong> <span id="esp32-last-seen">--</span></p>
+                    <p><strong>Animation:</strong> <span id="esp32-animation">Pulsing</span></p>
+                </div>
+            </div>
+            <style>
+                @keyframes esp32-pulse {
+                    0%, 100% { width: 87px; height: 87px; }
+                    50% { width: 95px; height: 95px; }
+                }
+                @keyframes esp32-pulse-fast {
+                    0%, 100% { width: 87px; height: 87px; }
+                    25% { width: 95px; height: 95px; }
+                    50% { width: 87px; height: 87px; }
+                    75% { width: 95px; height: 95px; }
+                }
+                #esp32-outer-glow {
+                    animation: esp32-pulse 2s ease-in-out infinite;
+                }
+            </style>
+        </div>
+    </div>
+
+    <script>
+        // Audio level chart
+        const ctx = document.getElementById('audio-chart').getContext('2d');
+        const audioData = new Array(100).fill(0);
+        const audioChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: audioData.map((_, i) => ''),
+                datasets: [{
+                    label: 'Audio Level',
+                    data: audioData,
+                    borderColor: '#00ff00',
+                    backgroundColor: 'rgba(0, 255, 0, 0.1)',
+                    fill: true,
+                    tension: 0.4,
+                    pointRadius: 0
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        max: 32767,
+                        grid: { color: '#333' },
+                        ticks: { color: '#666' }
+                    },
+                    x: {
+                        display: false
+                    }
+                },
+                plugins: {
+                    legend: { display: false }
+                },
+                animation: { duration: 0 }
+            }
+        });
+
+        function addLog(containerId, message, type) {
+            const container = document.getElementById(containerId);
+            const entry = document.createElement('div');
+            entry.className = 'log-entry ' + type;
+            const time = new Date().toLocaleTimeString();
+            entry.textContent = `[${time}] ${message}`;
+            container.appendChild(entry);
+            container.scrollTop = container.scrollHeight;
+
+            // Keep only last 50 entries
+            while (container.children.length > 50) {
+                container.removeChild(container.firstChild);
+            }
+        }
+
+        function updateState(state) {
+            document.querySelectorAll('.state').forEach(el => {
+                el.classList.remove('active');
+                if (el.dataset.state === state) {
+                    el.classList.add('active');
+                }
+            });
+
+            // Update ESP32 display elements based on state (matching actual ESP32 behavior)
+            const outerGlow = document.getElementById('esp32-outer-glow');
+            const mainEye = document.getElementById('esp32-main-eye');
+            const displayText = document.getElementById('esp32-display-text');
+            const animationText = document.getElementById('esp32-animation');
+
+            if (state === 'idle') {
+                // Normal idle - slow pulse, standard red colors
+                outerGlow.style.background = '#400000';
+                outerGlow.style.animation = 'esp32-pulse 2s ease-in-out infinite';
+                mainEye.style.background = '#c80000';
+                mainEye.style.borderColor = '#f80000';
+                displayText.textContent = 'HAL 9000 Online';
+                animationText.textContent = 'Pulsing (Idle)';
+            } else if (state.includes('awaiting') || state.includes('listening')) {
+                // Listening - faster pulse, brighter colors
+                outerGlow.style.background = '#500000';
+                outerGlow.style.animation = 'esp32-pulse-fast 0.5s ease-in-out infinite';
+                mainEye.style.background = '#f80000';
+                mainEye.style.borderColor = '#ff6400';
+                displayText.textContent = 'Listening...';
+                animationText.textContent = 'Listening...';
+            } else if (state.includes('asking') || state.includes('confirming') || state.includes('speaking')) {
+                // Speaking - medium pulse, slightly orange tint
+                outerGlow.style.background = '#420000';
+                outerGlow.style.animation = 'esp32-pulse 1s ease-in-out infinite';
+                mainEye.style.background = '#e20000';
+                mainEye.style.borderColor = '#fc0000';
+                displayText.textContent = 'Speaking...';
+                animationText.textContent = 'Speaking...';
+            }
+        }
+
+        // Poll for status updates
+        async function pollStatus() {
+            try {
+                const response = await fetch('/api/debug/status');
+                const data = await response.json();
+
+                // MQTT Status
+                const mqttIndicator = document.getElementById('mqtt-status');
+                const mqttText = document.getElementById('mqtt-status-text');
+                if (data.mqtt_connected) {
+                    mqttIndicator.className = 'status-indicator status-connected';
+                    mqttText.textContent = 'Connected';
+                } else {
+                    mqttIndicator.className = 'status-indicator status-disconnected';
+                    mqttText.textContent = 'Disconnected';
+                }
+
+                // State machine
+                updateState(data.state);
+
+                // Face info
+                document.getElementById('face-name').textContent = data.last_face || 'No face detected';
+                document.getElementById('face-status').textContent = data.face_status || '';
+                document.getElementById('known-faces').textContent = data.known_faces.join(', ') || 'None';
+
+                // TTS
+                if (data.last_tts) {
+                    document.getElementById('tts-text').textContent = '"' + data.last_tts + '"';
+                }
+
+                // Transcription
+                if (data.last_transcription !== undefined) {
+                    document.getElementById('transcription-text').textContent =
+                        data.last_transcription || '(empty)';
+                }
+
+                // Audio level
+                if (data.audio_level !== undefined) {
+                    const level = data.audio_level;
+                    const percent = Math.min(100, (level / 32767) * 100);
+                    document.getElementById('audio-level').style.width = percent + '%';
+                    document.getElementById('audio-level-text').textContent = level;
+
+                    // Update chart
+                    audioData.shift();
+                    audioData.push(level);
+                    audioChart.data.datasets[0].data = audioData;
+                    audioChart.update();
+                }
+
+                // ESP32 status
+                if (data.esp32_connected) {
+                    document.getElementById('esp32-status').textContent = 'Connected';
+                    document.getElementById('esp32-status').style.color = '#00ff00';
+                } else {
+                    document.getElementById('esp32-status').textContent = 'Disconnected';
+                    document.getElementById('esp32-status').style.color = '#ff0000';
+                }
+                if (data.esp32_ip) {
+                    document.getElementById('esp32-ip').textContent = data.esp32_ip;
+                }
+                if (data.esp32_last_seen) {
+                    document.getElementById('esp32-last-seen').textContent = data.esp32_last_seen;
+                }
+
+            } catch (e) {
+                console.error('Status poll error:', e);
+            }
+        }
+
+        // Poll for MQTT events
+        async function pollEvents() {
+            try {
+                const response = await fetch('/api/debug/events');
+                const data = await response.json();
+
+                data.events.forEach(event => {
+                    addLog('mqtt-log', event.message, event.type);
+                });
+
+            } catch (e) {
+                console.error('Events poll error:', e);
+            }
+        }
+
+        // Update camera feed
+        function updateCameraFeed() {
+            const img = document.getElementById('camera-img');
+            img.src = '/api/debug/camera?' + new Date().getTime();
+        }
+
+        // Update face snapshot
+        function updateFaceSnapshot() {
+            const img = document.getElementById('face-snapshot');
+            img.src = '/api/debug/snapshot?' + new Date().getTime();
+        }
+
+        // Start polling
+        setInterval(pollStatus, 500);
+        setInterval(pollEvents, 1000);
+        setInterval(updateCameraFeed, 1000);
+        setInterval(updateFaceSnapshot, 2000);
+
+        // Initial calls
+        pollStatus();
+        pollEvents();
+        updateCameraFeed();
+    </script>
+</body>
+</html>
