@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from anthropic import Anthropic
 from datetime import datetime
 import pytz
-from ddgs import DDGS
+from duckduckgo_search import DDGS
 import time
 import threading
 import requests
@@ -55,9 +55,9 @@ def play_audio_local(audio_file):
     except Exception as e:
         print(f"Error playing audio locally: {e}")
 
-# Initialize vision service
+# Initialize vision service (disabled - HAL controller handles camera now)
 vision_service = VisionService()
-vision_service.start()
+# vision_service.start()  # Disabled to avoid camera conflicts with HALController
 
 # Initialize face recognition service
 face_service = FaceRecognitionService()
@@ -700,18 +700,28 @@ def debug_status():
             except:
                 pass
 
+        # Get conversation and tracker info
+        conv_info = {}
+        tracker_info = {}
+        if controller.conversation_manager:
+            conv_info = controller.conversation_manager.get_debug_info()
+        if controller.person_tracker:
+            tracker_info = controller.person_tracker.get_debug_info()
+
         return jsonify({
-            'mqtt_connected': controller.mqtt_client.is_connected() if controller.mqtt_client else False,
+            'camera_active': controller.picam is not None,
             'state': controller.current_state,
             'last_face': debug_state['last_face'],
             'face_status': debug_state['face_status'],
             'known_faces': controller.face_service.get_known_names(),
             'last_tts': debug_state['last_tts'],
-            'last_transcription': debug_state['last_transcription'],
-            'audio_level': debug_state['audio_level'],
+            'last_transcription': controller.current_transcription,  # Read directly from controller
+            'audio_level': controller.current_audio_level,  # Read directly from controller
             'esp32_connected': esp32_connected,
             'esp32_ip': debug_state['esp32_ip'],
-            'esp32_last_seen': debug_state['esp32_last_seen']
+            'esp32_last_seen': debug_state['esp32_last_seen'],
+            'conversation': conv_info,
+            'tracker': tracker_info
         })
 
 @app.route('/api/debug/events')
@@ -725,21 +735,16 @@ def debug_events():
 
 @app.route('/api/debug/camera')
 def debug_camera():
-    """Get current camera frame from Frigate"""
-    try:
-        # Get frame from Frigate
-        response = requests.get('http://localhost:5001/api/hal_camera/latest.jpg', timeout=2)
-        if response.status_code == 200:
-            return Response(response.content, mimetype='image/jpeg')
-    except:
-        pass
+    """Get current camera frame from HAL controller"""
+    from hal_controller import get_controller
+    controller = get_controller()
 
-    # Fallback to vision service if Frigate unavailable
-    frame = vision_service.get_jpeg_frame()
+    # Get frame from HAL controller's camera
+    frame = controller.get_camera_frame()
     if frame:
         return Response(frame, mimetype='image/jpeg')
 
-    # Return placeholder
+    # Return error if no camera available
     return jsonify({'error': 'No camera available'}), 500
 
 @app.route('/api/debug/snapshot')
@@ -792,7 +797,171 @@ def debug_test_mic():
 
     return jsonify({'error': 'Recording failed'}), 500
 
+@app.route('/api/debug/record_playback')
+def debug_record_playback():
+    """Record audio and play it back to test mic and speaker"""
+    import numpy as np
+    import wave
+
+    try:
+        from hal_controller import get_controller
+        controller = get_controller()
+
+        duration = int(request.args.get('duration', 3))
+        test_file = '/tmp/mic_playback_test.wav'
+
+        # Record audio
+        result = subprocess.run([
+            'arecord', '-D', controller.audio_input_device,
+            '-f', 'S16_LE', '-r', '16000', '-c', '1', '-d', str(duration),
+            test_file
+        ], capture_output=True, timeout=duration + 2)
+
+        if not os.path.exists(test_file):
+            return jsonify({'error': 'Recording failed'}), 500
+
+        # Get audio stats
+        wf = wave.open(test_file, 'rb')
+        frames = wf.readframes(wf.getnframes())
+        audio = np.frombuffer(frames, dtype=np.int16)
+        wf.close()
+
+        max_level = int(np.max(np.abs(audio)))
+        mean_level = int(np.mean(np.abs(audio)))
+
+        # Play back the recording
+        subprocess.Popen([
+            'aplay', '-D', controller.audio_output_device, test_file
+        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        return jsonify({
+            'success': True,
+            'max_level': max_level,
+            'mean_level': mean_level,
+            'duration': duration
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/debug/quick_listen')
+def debug_quick_listen():
+    """Record 3 seconds and transcribe"""
+    import numpy as np
+    import wave
+
+    try:
+        from hal_controller import get_controller
+        controller = get_controller()
+
+        test_file = '/tmp/quick_listen_test.wav'
+
+        # Record 3 seconds
+        result = subprocess.run([
+            'arecord', '-D', controller.audio_input_device,
+            '-f', 'S16_LE', '-r', '16000', '-c', '1', '-d', '3',
+            test_file
+        ], capture_output=True, timeout=5)
+
+        if not os.path.exists(test_file):
+            return jsonify({'error': 'Recording failed'}), 500
+
+        # Get audio stats
+        wf = wave.open(test_file, 'rb')
+        frames = wf.readframes(wf.getnframes())
+        audio = np.frombuffer(frames, dtype=np.int16)
+        wf.close()
+
+        max_level = int(np.max(np.abs(audio)))
+
+        # Transcribe using Vosk (fast, on-device)
+        transcription = controller._transcribe_audio_vosk(test_file)
+
+        return jsonify({
+            'success': True,
+            'max_level': max_level,
+            'transcription': transcription
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 # ============== END DEBUG DASHBOARD ==============
+
+# ============== MEMORY API ENDPOINTS ==============
+
+@app.route('/api/memory/<name>')
+def get_memory_profile(name):
+    """Get a person's memory profile"""
+    from hal_controller import get_controller
+    controller = get_controller()
+    memory = controller.get_memory_store()
+
+    profile = memory.load_profile(name)
+    context = memory.get_context_for_claude(name)
+
+    return jsonify({
+        'profile': profile,
+        'context': context
+    })
+
+@app.route('/api/memory/<name>/conversations')
+def get_memory_conversations(name):
+    """Get a person's conversation history"""
+    from hal_controller import get_controller
+    controller = get_controller()
+    memory = controller.get_memory_store()
+
+    limit = request.args.get('limit', 5, type=int)
+    conversations = memory.get_recent_conversations(name, limit)
+
+    return jsonify({
+        'name': name,
+        'conversations': conversations,
+        'count': len(conversations)
+    })
+
+@app.route('/api/memory')
+def list_memory_people():
+    """List all people in memory"""
+    from hal_controller import get_controller
+    controller = get_controller()
+    memory = controller.get_memory_store()
+
+    people = memory.list_known_people()
+    return jsonify({
+        'people': people,
+        'count': len(people)
+    })
+
+@app.route('/api/debug/conversation')
+def debug_conversation():
+    """Get current conversation state for debug"""
+    from hal_controller import get_controller
+    controller = get_controller()
+
+    conv_manager = controller.get_conversation_manager()
+    person_tracker = controller.get_person_tracker()
+
+    conv_info = conv_manager.get_debug_info() if conv_manager else {}
+    tracker_info = person_tracker.get_debug_info() if person_tracker else {}
+
+    return jsonify({
+        'conversation': conv_info,
+        'tracker': tracker_info,
+        'controller_state': controller.current_state
+    })
+
+@app.route('/api/debug/tracker')
+def debug_tracker():
+    """Get person tracker state for debug"""
+    from hal_controller import get_controller
+    controller = get_controller()
+
+    tracker = controller.get_person_tracker()
+    return jsonify(tracker.get_debug_info())
+
+# ============== END MEMORY API ENDPOINTS ==============
 
 if __name__ == '__main__':
     if not MODEL_PATH.exists():
