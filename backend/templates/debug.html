@@ -180,19 +180,18 @@
     <h1>HAL 9000 DEBUG DASHBOARD</h1>
 
     <div class="dashboard">
-        <!-- MQTT Status -->
+        <!-- System Info -->
         <div class="panel">
-            <h2>MQTT Status</h2>
+            <h2>System Info</h2>
             <p>
-                <span id="mqtt-status" class="status-indicator status-unknown"></span>
-                <span id="mqtt-status-text">Checking...</span>
+                <span class="status-indicator status-connected"></span>
+                <span>Direct Camera Access (No MQTT)</span>
             </p>
-            <div class="log-box" id="mqtt-log"></div>
         </div>
 
         <!-- Video Feed -->
         <div class="panel">
-            <h2>Camera Feed (Frigate)</h2>
+            <h2>Camera Feed</h2>
             <div id="video-feed">
                 <img id="camera-img" src="" alt="Camera Feed">
             </div>
@@ -209,6 +208,15 @@
             <div class="transcription">
                 <div class="transcription-label">TRANSCRIPTION:</div>
                 <div class="transcription-text" id="transcription-text">--</div>
+            </div>
+            <div style="margin-top: 15px; display: flex; gap: 10px; flex-wrap: wrap;">
+                <button id="btn-record-playback" onclick="recordPlayback()" style="padding: 8px 16px; background: #333; color: #00ff00; border: 1px solid #00ff00; border-radius: 4px; cursor: pointer; font-family: inherit;">
+                    Test Mic & Speaker
+                </button>
+                <button id="btn-quick-listen" onclick="quickListen()" style="padding: 8px 16px; background: #333; color: #ffaa00; border: 1px solid #ffaa00; border-radius: 4px; cursor: pointer; font-family: inherit;">
+                    Quick Listen (3s)
+                </button>
+                <span id="audio-test-status" style="color: #888; font-size: 12px; align-self: center;"></span>
             </div>
         </div>
 
@@ -387,17 +395,6 @@
                 const response = await fetch('/api/debug/status');
                 const data = await response.json();
 
-                // MQTT Status
-                const mqttIndicator = document.getElementById('mqtt-status');
-                const mqttText = document.getElementById('mqtt-status-text');
-                if (data.mqtt_connected) {
-                    mqttIndicator.className = 'status-indicator status-connected';
-                    mqttText.textContent = 'Connected';
-                } else {
-                    mqttIndicator.className = 'status-indicator status-disconnected';
-                    mqttText.textContent = 'Disconnected';
-                }
-
                 // State machine
                 updateState(data.state);
 
@@ -488,6 +485,87 @@
         pollStatus();
         pollEvents();
         updateCameraFeed();
+
+        // Record and playback test
+        async function recordPlayback() {
+            const btn = document.getElementById('btn-record-playback');
+            const status = document.getElementById('audio-test-status');
+
+            btn.disabled = true;
+            btn.style.opacity = '0.5';
+            status.textContent = 'Recording 3s...';
+            status.style.color = '#ff0000';
+
+            try {
+                const response = await fetch('/api/debug/record_playback?duration=3');
+                const data = await response.json();
+
+                if (data.success) {
+                    status.textContent = `Played back! Max: ${data.max_level}, Mean: ${data.mean_level}`;
+                    status.style.color = '#00ff00';
+
+                    // Update audio meter with recorded level
+                    const percent = Math.min(100, (data.max_level / 32767) * 100);
+                    document.getElementById('audio-level').style.width = percent + '%';
+                    document.getElementById('audio-level-text').textContent = data.max_level;
+                } else {
+                    status.textContent = 'Error: ' + (data.error || 'Unknown');
+                    status.style.color = '#ff0000';
+                }
+            } catch (e) {
+                status.textContent = 'Error: ' + e.message;
+                status.style.color = '#ff0000';
+            }
+
+            btn.disabled = false;
+            btn.style.opacity = '1';
+
+            // Clear status after 5 seconds
+            setTimeout(() => { status.textContent = ''; }, 5000);
+        }
+
+        // Quick listen test with transcription
+        async function quickListen() {
+            const btn = document.getElementById('btn-quick-listen');
+            const status = document.getElementById('audio-test-status');
+
+            btn.disabled = true;
+            btn.style.opacity = '0.5';
+            status.textContent = 'Listening 3s...';
+            status.style.color = '#ffaa00';
+
+            try {
+                const response = await fetch('/api/debug/quick_listen');
+                const data = await response.json();
+
+                if (data.success) {
+                    status.textContent = `Level: ${data.max_level}`;
+                    status.style.color = '#00ff00';
+
+                    // Update transcription display
+                    if (data.transcription) {
+                        document.getElementById('transcription-text').textContent = data.transcription;
+                    }
+
+                    // Update audio meter
+                    const percent = Math.min(100, (data.max_level / 32767) * 100);
+                    document.getElementById('audio-level').style.width = percent + '%';
+                    document.getElementById('audio-level-text').textContent = data.max_level;
+                } else {
+                    status.textContent = 'Error: ' + (data.error || 'Unknown');
+                    status.style.color = '#ff0000';
+                }
+            } catch (e) {
+                status.textContent = 'Error: ' + e.message;
+                status.style.color = '#ff0000';
+            }
+
+            btn.disabled = false;
+            btn.style.opacity = '1';
+
+            // Clear status after 5 seconds
+            setTimeout(() => { status.textContent = ''; }, 5000);
+        }
     </script>
 </body>
 </html>
