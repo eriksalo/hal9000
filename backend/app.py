@@ -850,6 +850,13 @@ def debug_quick_listen():
     import numpy as np
     import wave
 
+    # Check if Hailo transcription is available
+    try:
+        from hailo_transcription_service import get_hailo_transcription_service
+        HAILO_TRANSCRIPTION_AVAILABLE = True
+    except:
+        HAILO_TRANSCRIPTION_AVAILABLE = False
+
     try:
         from hal_controller import get_controller
         controller = get_controller()
@@ -874,8 +881,14 @@ def debug_quick_listen():
 
         max_level = int(np.max(np.abs(audio)))
 
-        # Transcribe using Hailo Whisper
-        transcription = controller.transcribe_audio(test_file)
+        # Transcribe using Hailo transcription service
+        if HAILO_TRANSCRIPTION_AVAILABLE:
+            from hailo_transcription_service import get_hailo_transcription_service
+            transcription_service = get_hailo_transcription_service()
+            transcription = transcription_service.transcribe(test_file)
+        else:
+            # Use basic Vosk transcription
+            transcription = "Transcription not available"
 
         return jsonify({
             'success': True,
