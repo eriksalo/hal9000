@@ -174,6 +174,29 @@ void loop() {
     lv_timer_handler();
     delay(5);
 
+    // Poll backend status every 5 seconds to register ESP32 connection
+    static unsigned long last_status_poll = 0;
+    if (millis() - last_status_poll > 5000) {
+        last_status_poll = millis();
+
+        if (WiFi.status() == WL_CONNECTED) {
+            HTTPClient http;
+            String url = "http://" + api_host + ":" + String(api_port) + "/api/hal/status";
+
+            http.begin(url);
+            http.setTimeout(2000);  // 2 second timeout
+            int httpCode = http.GET();
+            http.end();
+
+            // Update status if needed
+            if (httpCode < 0) {
+                update_status("Backend Offline");
+            } else if (String(status_label->text).indexOf("Offline") != -1) {
+                update_status("HAL 9000 Online");
+            }
+        }
+    }
+
     // Check encoder button
     static bool last_btn = HIGH;
     bool btn = digitalRead(ENCODER_BTN);

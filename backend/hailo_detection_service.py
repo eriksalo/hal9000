@@ -183,8 +183,12 @@ class HailoDetectionService:
             if output is None:
                 continue
 
+            # Convert to numpy array if needed
+            if isinstance(output, list):
+                output = np.array(output, dtype=np.float32)
+
             # Handle different output shapes
-            if output.ndim == 1:
+            if not isinstance(output, np.ndarray) or output.ndim == 1:
                 continue  # Skip if no valid shape
 
             # Iterate through detections for this class
@@ -269,10 +273,11 @@ class HailoDetectionService:
                 # Run synchronous inference
                 self.configured_model.run([binding], timeout=5000)
 
-                # Extract outputs
+                # Extract outputs - use the pre-allocated numpy arrays
                 outputs = {}
                 for name in self.output_names:
-                    outputs[name] = binding.output(name).get_buffer()
+                    # Use the pre-allocated buffer directly
+                    outputs[name] = output_buffers[name]
 
                 # Postprocess
                 detections = self.postprocess(outputs, preproc_info)
