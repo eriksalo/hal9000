@@ -874,8 +874,8 @@ def debug_quick_listen():
 
         max_level = int(np.max(np.abs(audio)))
 
-        # Transcribe using Vosk (fast, on-device)
-        transcription = controller._transcribe_audio_vosk(test_file)
+        # Transcribe using Hailo Whisper
+        transcription = controller.transcribe_audio(test_file)
 
         return jsonify({
             'success': True,
