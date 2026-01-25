@@ -188,12 +188,8 @@ void loop() {
             int httpCode = http.GET();
             http.end();
 
-            // Update status if needed
-            if (httpCode < 0) {
-                update_status("Backend Offline");
-            } else if (String(status_label->text).indexOf("Offline") != -1) {
-                update_status("HAL 9000 Online");
-            }
+            // Status tracking is done on backend side by tracking the client IP
+            // No need to update status here, just keep polling
         }
     }
 
