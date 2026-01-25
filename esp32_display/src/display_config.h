@@ -8,6 +8,8 @@
 
 #define LGFX_USE_V1
 #include <LovyanGFX.hpp>
+#include <lgfx/v1/platforms/esp32s3/Panel_RGB.hpp>
+#include <lgfx/v1/platforms/esp32s3/Bus_RGB.hpp>
 
 // Pin definitions for VIEWE 2.1" Round Display
 #define TFT_BL      38  // Backlight
@@ -47,10 +49,10 @@
 #define TOUCH_INT   -1
 #define TOUCH_RST   -1
 
-// Encoder pins
-#define ENCODER_A   6
-#define ENCODER_B   5
-#define ENCODER_BTN 0  // Boot button
+// Encoder pins (using GPIOs that don't conflict with display)
+#define ENCODER_A   41
+#define ENCODER_B   42
+#define ENCODER_BTN 40
 
 class LGFX : public lgfx::LGFX_Device
 {
