@@ -810,15 +810,23 @@ def debug_record_playback():
         duration = int(request.args.get('duration', 3))
         test_file = '/tmp/mic_playback_test.wav'
 
-        # Record audio
-        result = subprocess.run([
-            'arecord', '-D', controller.audio_input_device,
-            '-f', 'S16_LE', '-r', '16000', '-c', '1', '-d', str(duration),
-            test_file
-        ], capture_output=True, timeout=duration + 2)
+        # Temporarily pause the mic monitor to free up the device
+        controller.pause_mic_monitor()
+
+        try:
+            # Record audio
+            result = subprocess.run([
+                'arecord', '-D', controller.audio_input_device,
+                '-f', 'S16_LE', '-r', '16000', '-c', '1', '-d', str(duration),
+                test_file
+            ], capture_output=True, timeout=duration + 2)
+        finally:
+            # Resume mic monitor
+            controller.resume_mic_monitor()
 
         if not os.path.exists(test_file):
-            return jsonify({'error': 'Recording failed'}), 500
+            error_msg = result.stderr.decode() if result.stderr else 'Unknown error'
+            return jsonify({'error': f'Recording failed: {error_msg}'}), 500
 
         # Get audio stats
         wf = wave.open(test_file, 'rb')
@@ -863,12 +871,19 @@ def debug_quick_listen():
 
         test_file = '/tmp/quick_listen_test.wav'
 
-        # Record 3 seconds
-        result = subprocess.run([
-            'arecord', '-D', controller.audio_input_device,
-            '-f', 'S16_LE', '-r', '16000', '-c', '1', '-d', '3',
-            test_file
-        ], capture_output=True, timeout=5)
+        # Temporarily pause the mic monitor to free up the device
+        controller.pause_mic_monitor()
+
+        try:
+            # Record 3 seconds
+            result = subprocess.run([
+                'arecord', '-D', controller.audio_input_device,
+                '-f', 'S16_LE', '-r', '16000', '-c', '1', '-d', '3',
+                test_file
+            ], capture_output=True, timeout=5)
+        finally:
+            # Resume mic monitor
+            controller.resume_mic_monitor()
 
         if not os.path.exists(test_file):
             return jsonify({'error': 'Recording failed'}), 500
@@ -885,7 +900,7 @@ def debug_quick_listen():
         if HAILO_TRANSCRIPTION_AVAILABLE:
             from hailo_transcription_service import get_hailo_transcription_service
             transcription_service = get_hailo_transcription_service()
-            transcription = transcription_service.transcribe(test_file)
+            transcription = transcription_service.transcribe_file(test_file)
         else:
             # Use basic Vosk transcription
             transcription = "Transcription not available"

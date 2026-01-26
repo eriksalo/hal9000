@@ -1195,6 +1195,15 @@ class HALController:
             return self.hailo_detection.describe_scene(self.pending_snapshot)
         return None
 
+    def pause_mic_monitor(self):
+        """Pause the continuous mic monitor (for testing mic/speaker)"""
+        self.mic_monitor_paused = True
+        time.sleep(0.3)  # Give mic monitor time to release the device
+
+    def resume_mic_monitor(self):
+        """Resume the continuous mic monitor"""
+        self.mic_monitor_paused = False
+
 
 # Global controller instance
 _controller = None
