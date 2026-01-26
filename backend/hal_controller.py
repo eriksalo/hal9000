@@ -1198,7 +1198,7 @@ class HALController:
     def pause_mic_monitor(self):
         """Pause the continuous mic monitor (for testing mic/speaker)"""
         self.mic_monitor_paused = True
-        time.sleep(0.3)  # Give mic monitor time to release the device
+        time.sleep(3.0)  # Give mic monitor time to finish current 2s recording and release
 
     def resume_mic_monitor(self):
         """Resume the continuous mic monitor"""
