@@ -409,6 +409,71 @@ def vision_frame():
     else:
         return jsonify({"error": "No camera frame available"}), 500
 
+def apply_red_filter(jpeg_bytes):
+    """Convert image to red-toned monochrome for HAL 9000 display"""
+    import cv2
+    import numpy as np
+
+    # Decode JPEG
+    nparr = np.frombuffer(jpeg_bytes, np.uint8)
+    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+    # Convert to grayscale
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    # Create red-toned image (red channel = gray, others dimmed)
+    red_img = np.zeros_like(img)
+    red_img[:,:,2] = gray  # Red channel (BGR format)
+    red_img[:,:,1] = gray // 4  # Slight green for warmth
+    red_img[:,:,0] = gray // 8  # Minimal blue
+
+    # Encode back to JPEG
+    _, encoded = cv2.imencode('.jpg', red_img, [cv2.IMWRITE_JPEG_QUALITY, 80])
+    return encoded.tobytes()
+
+@app.route('/api/hal/face_frame', methods=['GET'])
+def hal_face_frame():
+    """Face frame with optional red filter for ESP32 display"""
+    from hal_controller import get_controller
+    controller = get_controller()
+
+    red_filter = request.args.get('red', 'false').lower() == 'true'
+    size = request.args.get('size', 480, type=int)
+    size = min(max(size, 64), 480)  # Clamp between 64 and 480
+
+    # Get frame from HAL controller's camera
+    frame = controller.get_camera_frame(size=size)
+    if frame and red_filter:
+        frame = apply_red_filter(frame)
+
+    if frame:
+        return Response(frame, mimetype='image/jpeg')
+    else:
+        return jsonify({"error": "No camera frame available"}), 500
+
+@app.route('/api/hal/display', methods=['GET'])
+def hal_display():
+    """Display state for ESP32 - what to show"""
+    from hal_controller import get_controller
+    controller = get_controller()
+
+    tracker_info = controller.person_tracker.get_debug_info() if controller.person_tracker else {}
+    people_present = tracker_info.get('people_present', {})
+    has_face = bool(people_present)
+
+    # Get first person name if face detected
+    person_name = None
+    if has_face:
+        names = list(people_present.keys())
+        if names:
+            person_name = names[0]
+
+    return jsonify({
+        "mode": "face" if has_face else "eye",
+        "state": controller.current_state,
+        "person": person_name
+    })
+
 @app.route('/api/vision/analyze', methods=['POST'])
 def vision_analyze():
     """Analyze current camera view using Claude Vision API"""

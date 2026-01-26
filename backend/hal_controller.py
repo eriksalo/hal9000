@@ -618,10 +618,29 @@ class HALController:
 
             time.sleep(0.5)  # Small pause between samples
 
-    def get_camera_frame(self):
-        """Get the current camera frame as JPEG for debug display"""
+    def get_camera_frame(self, size=None):
+        """Get the current camera frame as JPEG for debug display
+
+        Args:
+            size: Optional size to resize the image (square output)
+        """
         if self.pending_snapshot is not None:
-            ret, buffer = cv2.imencode('.jpg', self.pending_snapshot, [cv2.IMWRITE_JPEG_QUALITY, 70])
+            frame = self.pending_snapshot
+
+            # Resize if size specified
+            if size is not None:
+                h, w = frame.shape[:2]
+                # Crop to square first (center crop)
+                if w > h:
+                    start = (w - h) // 2
+                    frame = frame[:, start:start+h]
+                elif h > w:
+                    start = (h - w) // 2
+                    frame = frame[start:start+w, :]
+                # Resize to target size
+                frame = cv2.resize(frame, (size, size), interpolation=cv2.INTER_AREA)
+
+            ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
             if ret:
                 return buffer.tobytes()
         return None

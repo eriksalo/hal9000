@@ -12,13 +12,13 @@
    COLOR SETTINGS
  *====================*/
 #define LV_COLOR_DEPTH 16
-#define LV_COLOR_16_SWAP 1
+#define LV_COLOR_16_SWAP 0
 
 /*====================
    MEMORY SETTINGS
  *====================*/
 #define LV_MEM_CUSTOM 0
-#define LV_MEM_SIZE (128U * 1024U)
+#define LV_MEM_SIZE (256U * 1024U)
 #define LV_MEM_ADR 0
 #define LV_MEM_POOL_INCLUDE <stdlib.h>
 #define LV_MEM_POOL_ALLOC malloc
