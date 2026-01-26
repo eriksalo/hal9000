@@ -1,104 +1,150 @@
 # Raspberry Pi 5 Setup Guide
 
-Complete guide to deploy HAL 9000 on your Raspberry Pi 5.
+Complete guide to deploy HAL 9000 on your Raspberry Pi 5 with Pi AI HAT+ 2 and Pi Camera.
 
 ## Prerequisites
 
-- Raspberry Pi 5 (4GB recommended)
+- Raspberry Pi 5 (4GB+ recommended)
 - MicroSD card (64GB+) with Raspberry Pi OS installed
+- **Pi Camera** (Camera Module 3 recommended)
+- **Pi AI HAT+ 2** (optional, for accelerated AI inference)
 - Internet connection
 - Power supply (5V/5A official adapter recommended)
 
-## Step 1: Initial Pi Setup
+## Quick Start (Automated Setup)
 
-### 1.1 Install Raspberry Pi OS
+For the fastest setup, use the automated script:
 
-If not already done:
+```bash
+# Clone the repository
+git clone https://github.com/eriksalo/hal9000.git
+cd hal9000
+
+# Run the setup script
+chmod +x setup_pi.sh
+./setup_pi.sh
+```
+
+The script will:
+- Install all required dependencies
+- Set up Pi Camera and audio support
+- Download the HAL 9000 voice model
+- Download the Vosk speech recognition model
+- Configure systemd services
+- Set up Nginx as a reverse proxy
+
+## Manual Setup
+
+If you prefer manual setup, follow these steps:
+
+### Step 1: Initial Pi Setup
+
+#### 1.1 Install Raspberry Pi OS
+
 1. Download [Raspberry Pi Imager](https://www.raspberrypi.com/software/)
-2. Flash **Raspberry Pi OS Lite (64-bit)** to your SD card
+2. Flash **Raspberry Pi OS (64-bit)** to your SD card
 3. Enable SSH in advanced options
 4. Set username/password
 5. Configure WiFi
 6. Boot the Pi
 
-### 1.2 Connect via SSH
+#### 1.2 Connect via SSH
 
-From your computer:
 ```bash
 ssh your_username@raspberrypi.local
-# Or use the IP address: ssh your_username@192.168.1.xxx
 ```
 
-### 1.3 Update System
+#### 1.3 Update System
 
 ```bash
 sudo apt update && sudo apt upgrade -y
 sudo reboot
 ```
 
-Wait for reboot, then reconnect via SSH.
+### Step 2: Install Dependencies
 
-## Step 2: Install Dependencies
-
-### 2.1 Install Python and Build Tools
+#### 2.1 System Dependencies
 
 ```bash
-sudo apt install -y python3 python3-pip python3-venv git curl build-essential
+sudo apt install -y \
+    python3 python3-pip python3-venv \
+    git curl build-essential nginx \
+    cmake libopenblas-dev liblapack-dev \
+    libjpeg-dev zlib1g-dev libpng-dev \
+    portaudio19-dev alsa-utils
 ```
 
-### 2.2 Install Piper TTS
+#### 2.2 Pi Camera Support
 
 ```bash
-# Install Piper TTS
-pip3 install piper-tts
-
-# Verify installation
-piper --version
+sudo apt install -y \
+    python3-libcamera \
+    python3-picamera2 \
+    libcamera-apps
 ```
 
-### 2.3 Install Required Python Packages
+#### 2.3 Python Packages
 
 ```bash
-pip3 install flask flask-cors anthropic python-dotenv pytz duckduckgo-search
+# System packages via apt (better compatibility)
+sudo apt install -y python3-numpy python3-opencv python3-pil
+
+# Pip packages
+pip3 install --break-system-packages \
+    flask flask-cors \
+    anthropic python-dotenv pytz \
+    duckduckgo-search piper-tts \
+    dlib face-recognition \
+    vosk webrtcvad paho-mqtt
 ```
 
-## Step 3: Clone and Setup HAL 9000
+### Step 3: Download Models
 
-### 3.1 Clone Repository
+#### 3.1 HAL 9000 Voice Model
 
 ```bash
-cd ~
-git clone https://github.com/eriksalo/hal9000.git
-cd hal9000
-```
-
-### 3.2 Download HAL 9000 Voice Model
-
-The model should already be in the repo, but if not:
-```bash
-cd hal_9000_model
+cd ~/hal9000/hal_9000_model
 curl -L -o hal.onnx "https://huggingface.co/campwill/HAL-9000-Piper-TTS/resolve/main/hal.onnx"
 curl -L -o hal.onnx.json "https://huggingface.co/campwill/HAL-9000-Piper-TTS/resolve/main/hal.onnx.json"
-cd ..
 ```
 
-### 3.3 Configure Environment
+#### 3.2 Vosk Speech Recognition Model
 
 ```bash
-# Create .env file with your API key
+mkdir -p ~/hal9000/vosk_model
+cd ~/hal9000/vosk_model
+curl -L -o vosk-model-small-en-us-0.15.zip \
+    "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip"
+unzip vosk-model-small-en-us-0.15.zip
+rm vosk-model-small-en-us-0.15.zip
+```
+
+### Step 4: Configure Environment
+
+Create the `.env` file:
+
+```bash
+cd ~/hal9000
 nano .env
 ```
 
-Add this line:
-```
+Add:
+```bash
 ANTHROPIC_API_KEY=your_api_key_here
+
+# Camera settings
+CAMERA_TYPE=picamera2
+CAMERA_WIDTH=1280
+CAMERA_HEIGHT=720
+CAMERA_FPS=15
+
+# Audio settings
+AUDIO_INPUT_DEVICE=default
+AUDIO_OUTPUT_DEVICE=default
+MIC_GAIN=5
 ```
 
-Save (Ctrl+X, Y, Enter)
-
-## Step 4: Test the Application
-
-### 4.1 Start Backend
+### Step 5: Test the Application
 
 ```bash
 cd ~/hal9000/backend
@@ -107,302 +153,167 @@ python3 app.py
 
 You should see:
 ```
+Vision service ready (camera type: picamera2, will initialize on first use)
 Claude API initialized successfully
 HAL 9000 TTS Server starting...
-Model loaded from: /home/username/hal9000/hal_9000_model/hal.onnx
-* Running on http://0.0.0.0:5000
 ```
 
-### 4.2 Test from Another Computer
+## Hardware Configuration
 
-From your main computer's browser:
-```
-http://raspberrypi.local:5000
-```
+### Pi Camera
 
-Or use the Pi's IP address:
-```
-http://192.168.1.xxx:5000
-```
-
-You should see... wait, we need to serve the frontend!
-
-### 4.3 Serve Frontend (Option 1: Simple Python Server)
-
-Open a new SSH terminal to the Pi:
-```bash
-cd ~/hal9000/frontend
-python3 -m http.server 8080
-```
-
-Now access:
-- Backend API: `http://raspberrypi.local:5000`
-- Frontend: `http://raspberrypi.local:8080`
-
-### 4.4 Test Voice and Chat
-
-1. Open `http://raspberrypi.local:8080` in your browser
-2. Click "Chat Mode"
-3. Type a message or use voice input
-4. HAL should respond with voice!
-
-## Step 5: Run on Startup (Optional)
-
-### 5.1 Create Systemd Service for Backend
+The system auto-detects Pi Camera via picamera2. Verify camera works:
 
 ```bash
-sudo nano /etc/systemd/system/hal9000-backend.service
+# Test camera
+libcamera-hello
+
+# Check camera is detected
+libcamera-hello --list-cameras
 ```
 
-Add:
-```ini
-[Unit]
-Description=HAL 9000 Backend API
-After=network.target
-
-[Service]
-Type=simple
-User=your_username
-WorkingDirectory=/home/your_username/hal9000/backend
-Environment="PATH=/home/your_username/.local/bin:/usr/local/bin:/usr/bin:/bin"
-ExecStart=/usr/bin/python3 app.py
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Replace `your_username` with your actual username.
-
-Save and enable:
+If using a USB webcam instead, set in `.env`:
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable hal9000-backend.service
-sudo systemctl start hal9000-backend.service
-
-# Check status
-sudo systemctl status hal9000-backend.service
+CAMERA_TYPE=opencv
+CAMERA_INDEX=0
 ```
 
-### 5.2 Create Systemd Service for Frontend
+### Audio Devices
+
+List available devices:
 
 ```bash
-sudo nano /etc/systemd/system/hal9000-frontend.service
+# Input devices (microphones)
+arecord -l
+
+# Output devices (speakers)
+aplay -l
 ```
 
-Add:
-```ini
-[Unit]
-Description=HAL 9000 Frontend Server
-After=network.target
-
-[Service]
-Type=simple
-User=your_username
-WorkingDirectory=/home/your_username/hal9000/frontend
-ExecStart=/usr/bin/python3 -m http.server 8080
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Enable:
+Configure in `.env`:
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable hal9000-frontend.service
-sudo systemctl start hal9000-frontend.service
-
-# Check status
-sudo systemctl status hal9000-frontend.service
+# Use 'default' or specific device like 'plughw:0,0'
+AUDIO_INPUT_DEVICE=default
+AUDIO_OUTPUT_DEVICE=default
 ```
 
-### 5.3 Verify Auto-Start
-
+Test audio:
 ```bash
-sudo reboot
+# Test speaker
+speaker-test -t wav -c 2
+
+# Test microphone (record 5 seconds, play back)
+arecord -d 5 test.wav && aplay test.wav
 ```
 
-After reboot, services should start automatically. Check:
+### Pi AI HAT+ 2 (Optional)
+
+The Pi AI HAT+ 2 provides 40 TOPS of AI acceleration. If detected, the system can use it for faster inference.
+
+Check if detected:
 ```bash
-sudo systemctl status hal9000-backend.service
-sudo systemctl status hal9000-frontend.service
+lspci | grep -i hailo
 ```
 
-## Step 6: Better Deployment with Nginx (Recommended)
+The Hailo runtime integrates with picamera2 for accelerated object detection and face recognition.
 
-For a more professional setup:
+## ESP32 Display
 
-### 6.1 Install Nginx
+The ESP32 display connects via WiFi and fetches frames/status from the API:
 
-```bash
-sudo apt install nginx -y
-```
+- Status endpoint: `http://<pi-ip>/api/hal/status`
+- Frame endpoint: `http://<pi-ip>/api/vision/frame?size=480`
+- Chat endpoint: `http://<pi-ip>/api/chat`
 
-### 6.2 Configure Nginx
-
-```bash
-sudo nano /etc/nginx/sites-available/hal9000
-```
-
-Add:
-```nginx
-server {
-    listen 80;
-    server_name raspberrypi.local;
-
-    # Serve frontend
-    location / {
-        root /home/your_username/hal9000/frontend;
-        try_files $uri $uri/ /index.html;
-    }
-
-    # Proxy API requests to Flask backend
-    location /api/ {
-        proxy_pass http://localhost:5000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    }
-
-    location /health {
-        proxy_pass http://localhost:5000;
-        proxy_set_header Host $host;
-    }
-}
-```
-
-Enable the site:
-```bash
-sudo ln -s /etc/nginx/sites-available/hal9000 /etc/nginx/sites-enabled/
-sudo nginx -t
-sudo systemctl restart nginx
-```
-
-Now you can access HAL at just:
-```
-http://raspberrypi.local
-```
-
-No port numbers needed!
+Configure the ESP32 with your Pi's IP address in `secrets.h`.
 
 ## Troubleshooting
 
+### Camera not working
+
+```bash
+# Check if camera is detected
+libcamera-hello --list-cameras
+
+# Check camera interface is enabled
+sudo raspi-config
+# Navigate to Interface Options > Camera > Enable
+
+# Check for permission issues
+ls -la /dev/video*
+```
+
+### Audio not working
+
+```bash
+# List audio devices
+aplay -l
+arecord -l
+
+# Test with specific device
+aplay -D plughw:0,0 /usr/share/sounds/alsa/Front_Center.wav
+
+# Check ALSA configuration
+alsamixer
+```
+
 ### Backend won't start
+
 ```bash
 # Check logs
 journalctl -u hal9000-backend.service -f
 
 # Manual test
 cd ~/hal9000/backend
-python3 app.py
+python3 app.py 2>&1 | head -50
 ```
 
-### Can't access from browser
+### Missing dependencies
+
 ```bash
-# Check Pi's IP address
-hostname -I
-
-# Test backend locally on Pi
-curl http://localhost:5000/health
-
-# Check firewall (Pi OS usually has none by default)
-sudo ufw status
-```
-
-### Piper TTS not found
-```bash
-# Check Piper installation
-which piper
-pip3 show piper-tts
+# Check Python dependencies
+pip3 list | grep -E "(vosk|webrtcvad|paho|picamera)"
 
 # Reinstall if needed
-pip3 install --upgrade piper-tts
+pip3 install --break-system-packages -r backend/requirements.txt
 ```
 
-### Model file missing
-```bash
-ls -lh ~/hal9000/hal_9000_model/
-# Should show hal.onnx (61MB) and hal.onnx.json
-```
-
-## Performance Tips
-
-### Reduce memory usage
-Edit backend/app.py and reduce max_tokens for Claude API responses.
-
-### Speed up TTS
-Piper is already quite fast on Pi 5. If you need faster:
-- Consider Piper's smaller voice models
-- Or use cloud TTS (Google, AWS)
-
-### Monitor resources
-```bash
-# Check CPU and memory
-htop
-
-# Check temperature
-vcgencmd measure_temp
-```
-
-## Next Steps
-
-Once basic deployment works:
-1. Add camera for face recognition (future)
-2. Add microphone for local voice input (future)
-3. Add speaker for audio output (future)
-4. Set up wake word detection (future)
-
-## Finding Your Pi's IP Address
+## Service Management
 
 ```bash
-# On the Pi
-hostname -I
-
-# From your computer (scan network)
-# Windows
-arp -a
-
-# Mac/Linux
-arp -a | grep -i raspberry
-# Or
-sudo nmap -sn 192.168.1.0/24
-```
-
-## Quick Reference
-
-**Start services:**
-```bash
+# Start
 sudo systemctl start hal9000-backend
-sudo systemctl start hal9000-frontend
-```
 
-**Stop services:**
-```bash
+# Stop
 sudo systemctl stop hal9000-backend
-sudo systemctl stop hal9000-frontend
-```
 
-**View logs:**
-```bash
-journalctl -u hal9000-backend -f
-journalctl -u hal9000-frontend -f
-```
-
-**Restart after code changes:**
-```bash
-cd ~/hal9000
-git pull
+# Restart
 sudo systemctl restart hal9000-backend
-# Frontend serves static files, no restart needed
+
+# View logs
+journalctl -u hal9000-backend -f
+
+# Check status
+sudo systemctl status hal9000-backend
 ```
 
 ## Access URLs
 
-- **With Nginx:** http://raspberrypi.local
-- **Without Nginx:**
-  - Frontend: http://raspberrypi.local:8080
-  - Backend API: http://raspberrypi.local:5000
-- **From your network:** http://[Pi-IP-address]
+- **Web Interface:** http://raspberrypi.local or http://[Pi-IP]
+- **Debug Dashboard:** http://[Pi-IP]/debug
+- **API Health:** http://[Pi-IP]/health
+- **Vision Stream:** http://[Pi-IP]/api/vision/stream
+
+## Environment Variables Reference
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ANTHROPIC_API_KEY` | (required) | Your Anthropic API key |
+| `CAMERA_TYPE` | `picamera2` | Camera type: `picamera2` or `opencv` |
+| `CAMERA_WIDTH` | `1280` | Camera capture width |
+| `CAMERA_HEIGHT` | `720` | Camera capture height |
+| `CAMERA_FPS` | `15` | Camera frame rate |
+| `CAMERA_INDEX` | `0` | USB webcam index (opencv only) |
+| `AUDIO_INPUT_DEVICE` | `default` | Microphone ALSA device |
+| `AUDIO_OUTPUT_DEVICE` | `default` | Speaker ALSA device |
+| `MIC_GAIN` | `5` | Microphone amplification factor |

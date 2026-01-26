@@ -8,3 +8,15 @@ ddgs>=9.10.0
 opencv-python-headless>=4.8.0
 pillow>=10.0.0
 face-recognition>=1.3.0
+
+# Speech recognition (was missing)
+vosk>=0.3.32
+webrtcvad>=2.0.10
+
+# MQTT for Frigate integration (was missing)
+paho-mqtt>=1.6.1
+
+# Pi Camera support (for Raspberry Pi with Pi Camera)
+# Note: picamera2 is best installed via apt on Raspberry Pi OS
+# sudo apt install python3-picamera2
+# picamera2>=0.3.12

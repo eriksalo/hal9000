@@ -584,6 +584,7 @@ def hal_status():
     client_ip = request.remote_addr
     if client_ip and client_ip != '127.0.0.1':
         set_esp32_seen(client_ip)
+        print(f"[API] /api/hal/status from {client_ip}", flush=True)
 
     return jsonify(controller.get_status())
 
@@ -675,6 +676,8 @@ def set_esp32_seen(ip_address):
         debug_state['esp32_connected'] = True
         debug_state['esp32_ip'] = ip_address
         debug_state['esp32_last_seen'] = datetime.now().strftime('%H:%M:%S')
+        # Log to help debugging
+        print(f"[ESP32] Seen at {ip_address} at {debug_state['esp32_last_seen']}", flush=True)
 
 @app.route('/debug')
 def debug_dashboard():
@@ -723,6 +726,43 @@ def debug_status():
             'conversation': conv_info,
             'tracker': tracker_info
         })
+
+@app.route('/api/debug/test_esp32')
+def debug_test_esp32():
+    """Simulate ESP32 connection for testing"""
+    test_ip = request.args.get('ip', '10.0.0.TEST')
+    set_esp32_seen(test_ip)
+    return jsonify({'success': True, 'message': f'Simulated ESP32 connection from {test_ip}'})
+
+@app.route('/api/debug/scan_esp32')
+def debug_scan_esp32():
+    """Scan network for potential ESP32 devices"""
+    import subprocess
+
+    # Get ARP table
+    result = subprocess.run(['arp', '-n'], capture_output=True, text=True)
+    devices = []
+
+    for line in result.stdout.split('\n'):
+        if '10.0.0.' in line and 'ether' in line:
+            parts = line.split()
+            ip = parts[0]
+            mac = parts[2] if len(parts) > 2 else 'unknown'
+
+            # ESP32 MAC addresses typically start with specific OUIs
+            # Espressif: 24:0A:C4, 30:AE:A4, etc.
+            is_esp = mac.startswith(('24:0a', '24:0A', '30:ae', '30:AE', 'a4:cf', 'A4:CF'))
+
+            devices.append({
+                'ip': ip,
+                'mac': mac,
+                'likely_esp32': is_esp
+            })
+
+    return jsonify({
+        'devices': devices,
+        'count': len(devices)
+    })
 
 @app.route('/api/debug/events')
 def debug_events():
@@ -854,16 +894,10 @@ def debug_record_playback():
 
 @app.route('/api/debug/quick_listen')
 def debug_quick_listen():
-    """Record 3 seconds and transcribe"""
+    """Record 3 seconds and transcribe using fast Vosk"""
     import numpy as np
     import wave
-
-    # Check if Hailo transcription is available
-    try:
-        from hailo_transcription_service import get_hailo_transcription_service
-        HAILO_TRANSCRIPTION_AVAILABLE = True
-    except:
-        HAILO_TRANSCRIPTION_AVAILABLE = False
+    import json
 
     try:
         from hal_controller import get_controller
@@ -896,14 +930,15 @@ def debug_quick_listen():
 
         max_level = int(np.max(np.abs(audio)))
 
-        # Transcribe using Hailo transcription service
-        if HAILO_TRANSCRIPTION_AVAILABLE:
-            from hailo_transcription_service import get_hailo_transcription_service
-            transcription_service = get_hailo_transcription_service()
-            transcription = transcription_service.transcribe_file(test_file)
+        # Use Vosk for fast transcription (same as mic monitor)
+        if controller.vosk_model is not None:
+            from vosk import KaldiRecognizer
+            recognizer = KaldiRecognizer(controller.vosk_model, 16000)
+            recognizer.AcceptWaveform(audio.tobytes())
+            result_json = json.loads(recognizer.FinalResult())
+            transcription = result_json.get("text", "")
         else:
-            # Use basic Vosk transcription
-            transcription = "Transcription not available"
+            transcription = "Vosk not available"
 
         return jsonify({
             'success': True,

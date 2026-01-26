@@ -247,14 +247,18 @@
                 <div class="transcription-label">TRANSCRIPTION:</div>
                 <div class="transcription-text" id="transcription-text">--</div>
             </div>
-            <div style="margin-top: 15px; display: flex; gap: 10px; flex-wrap: wrap;">
+            <div style="margin-top: 15px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
                 <button id="btn-record-playback" onclick="recordPlayback()" style="padding: 8px 16px; background: #333; color: #00ff00; border: 1px solid #00ff00; border-radius: 4px; cursor: pointer; font-family: inherit;">
                     Test Mic & Speaker
                 </button>
                 <button id="btn-quick-listen" onclick="quickListen()" style="padding: 8px 16px; background: #333; color: #ffaa00; border: 1px solid #ffaa00; border-radius: 4px; cursor: pointer; font-family: inherit;">
                     Quick Listen (3s)
                 </button>
-                <span id="audio-test-status" style="color: #888; font-size: 12px; align-self: center;"></span>
+                <label style="color: #888; font-size: 12px; display: flex; align-items: center; gap: 5px;">
+                    <input type="checkbox" id="fast-mode-checkbox" style="cursor: pointer;">
+                    Fast Mode (skip VAD)
+                </label>
+                <span id="audio-test-status" style="color: #888; font-size: 12px;"></span>
             </div>
         </div>
 
@@ -312,6 +316,14 @@
                     <p><strong>IP:</strong> <span id="esp32-ip">--</span></p>
                     <p><strong>Last Seen:</strong> <span id="esp32-last-seen">--</span></p>
                     <p><strong>Animation:</strong> <span id="esp32-animation">Pulsing</span></p>
+                    <p style="margin-top: 10px; font-size: 11px; color: #888;">
+                        <strong>Troubleshooting:</strong><br>
+                        ESP32 should poll /api/hal/status every 5s<br>
+                        <span id="esp32-troubleshoot" style="color: #ff8800;"></span>
+                    </p>
+                    <button onclick="testESP32Connection()" style="margin-top: 8px; padding: 6px 12px; background: #333; color: #00aaff; border: 1px solid #00aaff; border-radius: 4px; cursor: pointer; font-family: inherit; font-size: 11px;">
+                        Simulate ESP32 Connection
+                    </button>
                 </div>
             </div>
             <style>
@@ -467,18 +479,33 @@
                 }
 
                 // ESP32 status
+                const troubleshoot = document.getElementById('esp32-troubleshoot');
                 if (data.esp32_connected) {
-                    document.getElementById('esp32-status').textContent = 'Connected';
+                    document.getElementById('esp32-status').textContent = 'Connected ✓';
                     document.getElementById('esp32-status').style.color = '#00ff00';
+                    troubleshoot.textContent = `Polling from ${data.esp32_ip}`;
+                    troubleshoot.style.color = '#00ff00';
                 } else {
-                    document.getElementById('esp32-status').textContent = 'Disconnected';
+                    document.getElementById('esp32-status').textContent = 'Disconnected ✗';
                     document.getElementById('esp32-status').style.color = '#ff0000';
+
+                    if (data.esp32_ip && data.esp32_last_seen) {
+                        troubleshoot.textContent = `Lost connection since ${data.esp32_last_seen}. Check ESP32 power/serial.`;
+                        troubleshoot.style.color = '#ff8800';
+                    } else {
+                        troubleshoot.textContent = 'ESP32 never connected. Check: WiFi "SALO", Backend 10.0.0.186:8080, Firmware uploaded?';
+                        troubleshoot.style.color = '#ff8800';
+                    }
                 }
                 if (data.esp32_ip) {
                     document.getElementById('esp32-ip').textContent = data.esp32_ip;
+                } else {
+                    document.getElementById('esp32-ip').textContent = 'Unknown (not connected)';
                 }
                 if (data.esp32_last_seen) {
                     document.getElementById('esp32-last-seen').textContent = data.esp32_last_seen;
+                } else {
+                    document.getElementById('esp32-last-seen').textContent = 'Never';
                 }
 
             } catch (e) {
@@ -597,14 +624,15 @@
         async function quickListen() {
             const btn = document.getElementById('btn-quick-listen');
             const status = document.getElementById('audio-test-status');
+            const fastMode = document.getElementById('fast-mode-checkbox').checked;
 
             btn.disabled = true;
             btn.style.opacity = '0.5';
-            status.textContent = 'Listening 3s...';
+            status.textContent = fastMode ? 'Listening 3s (fast)...' : 'Listening 3s...';
             status.style.color = '#ffaa00';
 
             try {
-                const response = await fetch('/api/debug/quick_listen');
+                const response = await fetch(`/api/debug/quick_listen?fast_mode=${fastMode}`);
                 const data = await response.json();
 
                 if (data.success) {
@@ -634,6 +662,30 @@
 
             // Clear status after 5 seconds
             setTimeout(() => { status.textContent = ''; }, 5000);
+        }
+
+        async function testESP32Connection() {
+            const troubleshoot = document.getElementById('esp32-troubleshoot');
+            troubleshoot.textContent = 'Simulating ESP32 connection...';
+            troubleshoot.style.color = '#00aaff';
+
+            try {
+                const response = await fetch('/api/debug/test_esp32?ip=10.0.0.TEST');
+                const data = await response.json();
+
+                if (data.success) {
+                    troubleshoot.textContent = 'Test successful! Check status above.';
+                    troubleshoot.style.color = '#00ff00';
+                } else {
+                    troubleshoot.textContent = 'Test failed';
+                    troubleshoot.style.color = '#ff0000';
+                }
+            } catch (e) {
+                troubleshoot.textContent = 'Error: ' + e.message;
+                troubleshoot.style.color = '#ff0000';
+            }
+
+            setTimeout(() => { troubleshoot.textContent = ''; }, 5000);
         }
     </script>
 </body>

@@ -159,6 +159,11 @@ void setup() {
         Serial.println("\nWiFi connected!");
         Serial.print("IP: ");
         Serial.println(WiFi.localIP());
+        Serial.print("Gateway: ");
+        Serial.println(WiFi.gatewayIP());
+        Serial.print("DNS: ");
+        Serial.println(WiFi.dnsIP());
+        Serial.printf("Backend URL: http://%s:%d/api/hal/status\n", api_host.c_str(), api_port);
         update_status("HAL 9000 Online");
     } else {
         Serial.println("\nWiFi connection failed!");
@@ -183,13 +188,31 @@ void loop() {
             HTTPClient http;
             String url = "http://" + api_host + ":" + String(api_port) + "/api/hal/status";
 
-            http.begin(url);
-            http.setTimeout(2000);  // 2 second timeout
-            int httpCode = http.GET();
-            http.end();
+            if (!http.begin(url)) {
+                Serial.println("HTTP begin failed!");
+                return;
+            }
 
-            // Status tracking is done on backend side by tracking the client IP
-            // No need to update status here, just keep polling
+            http.setTimeout(5000);  // Increased to 5 second timeout
+            http.setReuse(false);   // Don't reuse connections
+            int httpCode = http.GET();
+
+            if (httpCode > 0) {
+                // Success - backend received our connection
+                static bool first_success = true;
+                if (first_success) {
+                    Serial.printf("Backend connected! HTTP %d\n", httpCode);
+                    first_success = false;
+                }
+            } else {
+                // Error codes: -1 = connection failed, -11 = timeout
+                const char* errorStr = http.errorToString(httpCode).c_str();
+                Serial.printf("Backend poll error: %d (%s) URL: %s\n", httpCode, errorStr, url.c_str());
+            }
+
+            http.end();
+        } else {
+            Serial.println("WiFi disconnected!");
         }
     }
 
