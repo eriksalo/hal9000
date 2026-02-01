@@ -1,0 +1,263 @@
+/* Additional styles for WebRTC interface */
+
+/* HAL Eye States for Pipecat */
+.hal-eye.idle {
+    animation: pulse 2s ease-in-out infinite;
+}
+
+.hal-eye.listening {
+    animation: pulse 1s ease-in-out infinite;
+    background: radial-gradient(circle, #00ff00 0%, #008b00 50%, #000000 100%);
+    box-shadow:
+        0 0 20px rgba(0, 255, 0, 0.8),
+        inset 0 0 20px rgba(0, 255, 0, 0.5);
+}
+
+.hal-eye.speaking {
+    animation: pulse 0.5s ease-in-out infinite;
+    background: radial-gradient(circle, #ff8800 0%, #8b4400 50%, #000000 100%);
+    box-shadow:
+        0 0 20px rgba(255, 136, 0, 0.8),
+        inset 0 0 20px rgba(255, 136, 0, 0.5);
+}
+
+.hal-eye.connecting {
+    animation: pulse 0.8s ease-in-out infinite;
+    background: radial-gradient(circle, #ffff00 0%, #8b8b00 50%, #000000 100%);
+    box-shadow:
+        0 0 20px rgba(255, 255, 0, 0.8),
+        inset 0 0 20px rgba(255, 255, 0, 0.5);
+}
+
+.hal-eye.error {
+    animation: pulse 0.3s ease-in-out infinite;
+    background: radial-gradient(circle, #ff0000 0%, #8b0000 50%, #000000 100%);
+    box-shadow:
+        0 0 30px rgba(255, 0, 0, 1),
+        inset 0 0 30px rgba(255, 0, 0, 0.8);
+}
+
+/* Connection Panel */
+.connection-panel {
+    padding: 20px;
+}
+
+.form-group {
+    margin-bottom: 20px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 8px;
+    color: #ff6666;
+    font-size: 14px;
+    text-transform: uppercase;
+}
+
+.form-group input {
+    width: 100%;
+    padding: 12px;
+    background: rgba(0, 0, 0, 0.5);
+    border: 1px solid #ff0000;
+    border-radius: 5px;
+    color: #ff0000;
+    font-family: 'Courier New', monospace;
+    font-size: 14px;
+}
+
+.form-group input:focus {
+    outline: none;
+    border-color: #ff6666;
+    box-shadow: 0 0 10px rgba(255, 0, 0, 0.3);
+}
+
+/* Conversation Panel */
+.conversation-panel {
+    padding: 20px;
+}
+
+.conversation-info {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 15px;
+    margin-bottom: 20px;
+    padding: 15px;
+    background: rgba(255, 0, 0, 0.1);
+    border: 1px solid rgba(255, 0, 0, 0.3);
+    border-radius: 5px;
+}
+
+.info-item {
+    display: flex;
+    flex-direction: column;
+}
+
+.info-item .label {
+    font-size: 12px;
+    color: #ff6666;
+    margin-bottom: 5px;
+}
+
+.info-item .value {
+    font-size: 16px;
+    color: #ff0000;
+    font-weight: bold;
+}
+
+/* Transcript */
+.transcript-container {
+    margin-bottom: 20px;
+}
+
+.transcript-container h3 {
+    color: #ff6666;
+    margin-bottom: 10px;
+    font-size: 16px;
+}
+
+.transcript {
+    background: rgba(0, 0, 0, 0.5);
+    border: 1px solid rgba(255, 0, 0, 0.3);
+    border-radius: 5px;
+    padding: 15px;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.transcript-entry {
+    margin-bottom: 10px;
+    padding: 8px;
+    border-left: 3px solid #ff0000;
+    background: rgba(255, 0, 0, 0.05);
+}
+
+.transcript-entry.transcript-user {
+    border-left-color: #00ff00;
+}
+
+.transcript-entry.transcript-assistant {
+    border-left-color: #ff8800;
+}
+
+.transcript-entry.transcript-system {
+    border-left-color: #666666;
+    background: rgba(100, 100, 100, 0.05);
+}
+
+.transcript-time {
+    font-size: 11px;
+    color: #888;
+    margin-right: 10px;
+}
+
+.transcript-role {
+    font-weight: bold;
+    margin-right: 10px;
+}
+
+.transcript-message {
+    color: #ff6666;
+}
+
+/* Controls */
+.controls {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+.btn-control {
+    flex: 1;
+}
+
+.btn-control.active {
+    background: rgba(255, 0, 0, 0.3);
+    border-color: #ff6666;
+}
+
+.btn-danger {
+    background: rgba(139, 0, 0, 0.5);
+    border-color: #8b0000;
+}
+
+.btn-danger:hover {
+    background: rgba(139, 0, 0, 0.8);
+}
+
+/* Visualizer */
+.visualizer-container {
+    background: rgba(0, 0, 0, 0.5);
+    border: 1px solid rgba(255, 0, 0, 0.3);
+    border-radius: 5px;
+    padding: 10px;
+    display: flex;
+    justify-content: center;
+}
+
+#visualizer {
+    display: block;
+    max-width: 100%;
+    height: auto;
+}
+
+/* Instructions */
+.instructions {
+    margin-top: 30px;
+    padding: 20px;
+    background: rgba(255, 0, 0, 0.05);
+    border: 1px solid rgba(255, 0, 0, 0.2);
+    border-radius: 5px;
+}
+
+.instructions h3 {
+    color: #ff6666;
+    margin-bottom: 15px;
+    font-size: 16px;
+}
+
+.instructions ol {
+    margin-left: 20px;
+    color: #ff6666;
+}
+
+.instructions li {
+    margin-bottom: 8px;
+    line-height: 1.5;
+}
+
+.instructions a {
+    color: #ff8800;
+    text-decoration: none;
+}
+
+.instructions a:hover {
+    text-decoration: underline;
+}
+
+/* Status States */
+.status-idle {
+    color: #666;
+}
+
+.status-connecting {
+    color: #ffff00;
+    animation: pulse-text 1s ease-in-out infinite;
+}
+
+.status-connected {
+    color: #00ff00;
+}
+
+.status-error {
+    color: #ff0000;
+    font-weight: bold;
+}
+
+.status-disconnected {
+    color: #888;
+}
+
+@keyframes pulse-text {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}

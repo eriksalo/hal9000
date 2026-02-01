@@ -1,0 +1,33 @@
+[Unit]
+Description=HAL 9000 Pipecat Autonomous Controller
+After=network.target
+
+[Service]
+Type=simple
+User=erik
+WorkingDirectory=/home/erik/hal9000/backend_pipecat
+Environment="PATH=/home/erik/.local/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONPATH=/home/erik/hal9000/backend_pipecat:/home/erik/hal9000/backend"
+
+# Start Flask backend first (for TTS HTTP service)
+ExecStartPre=/bin/sleep 5
+ExecStartPre=/usr/bin/python3 /home/erik/hal9000/backend/app.py &
+
+# Start HAL autonomous controller
+ExecStart=/usr/bin/python3 /home/erik/hal9000/backend_pipecat/hal_autonomous.py
+
+# Restart policy
+Restart=on-failure
+RestartSec=10
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hal-pipecat
+
+# Resource limits
+MemoryLimit=2G
+CPUQuota=200%
+
+[Install]
+WantedBy=multi-user.target

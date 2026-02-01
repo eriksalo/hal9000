@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HAL 9000 - Pipecat WebRTC</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="styles_webrtc.css">
+    <!-- Daily.co WebRTC SDK -->
+    <script src="https://unpkg.com/@daily-co/daily-js"></script>
+</head>
+<body>
+    <div class="container">
+        <!-- HAL Eye Animation -->
+        <div class="hal-eye-container">
+            <div class="hal-eye" id="halEye">
+                <div class="eye-inner"></div>
+            </div>
+        </div>
+
+        <h1 class="title">HAL 9000</h1>
+        <p class="subtitle">Pipecat WebRTC Interface</p>
+
+        <!-- Connection Status -->
+        <div class="status" id="status">System Standby</div>
+
+        <!-- Main Panel -->
+        <div class="main-panel">
+            <!-- Connection Settings -->
+            <div class="connection-panel" id="connectionPanel">
+                <h3>Daily.co Room Configuration</h3>
+
+                <div class="form-group">
+                    <label for="roomUrl">Room URL</label>
+                    <input
+                        type="text"
+                        id="roomUrl"
+                        placeholder="https://your-domain.daily.co/room-name"
+                        value=""
+                    />
+                </div>
+
+                <div class="form-group">
+                    <label for="roomToken">Room Token (optional)</label>
+                    <input
+                        type="text"
+                        id="roomToken"
+                        placeholder="Your Daily.co token"
+                        value=""
+                    />
+                </div>
+
+                <div class="form-group">
+                    <label for="personName">Your Name</label>
+                    <input
+                        type="text"
+                        id="personName"
+                        placeholder="Dave"
+                        value="Dave"
+                    />
+                </div>
+
+                <button id="connectBtn" class="btn btn-primary">
+                    Connect to HAL
+                </button>
+            </div>
+
+            <!-- Conversation Panel (hidden until connected) -->
+            <div class="conversation-panel" id="conversationPanel" style="display: none;">
+                <div class="conversation-info">
+                    <div class="info-item">
+                        <span class="label">Status:</span>
+                        <span id="callStatus" class="value">Connecting...</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="label">Latency:</span>
+                        <span id="latency" class="value">-- ms</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="label">Speaking:</span>
+                        <span id="speakingStatus" class="value">No</span>
+                    </div>
+                </div>
+
+                <!-- Transcript Display -->
+                <div class="transcript-container">
+                    <h3>Conversation Transcript</h3>
+                    <div class="transcript" id="transcript">
+                        <div class="system-message">
+                            HAL 9000 is ready. Speak naturally to begin conversation.
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Controls -->
+                <div class="controls">
+                    <button id="muteBtn" class="btn btn-control">
+                        🎤 Mute
+                    </button>
+                    <button id="speakerBtn" class="btn btn-control">
+                        🔊 Speaker On
+                    </button>
+                    <button id="disconnectBtn" class="btn btn-danger">
+                        Disconnect
+                    </button>
+                </div>
+
+                <!-- Audio Visualizer -->
+                <div class="visualizer-container">
+                    <canvas id="visualizer" width="600" height="100"></canvas>
+                </div>
+            </div>
+
+            <!-- Camera View (for face recognition integration) -->
+            <div class="vision-section" id="visionSection" style="display: none;">
+                <h3>Camera View</h3>
+                <div class="camera-container">
+                    <img id="cameraStream" src="" alt="Camera feed">
+                </div>
+            </div>
+        </div>
+
+        <!-- Instructions -->
+        <div class="instructions">
+            <h3>Instructions</h3>
+            <ol>
+                <li>Enter your Daily.co room URL (create one at <a href="https://daily.co" target="_blank">daily.co</a>)</li>
+                <li>Optionally provide a room token for secure access</li>
+                <li>Enter your name for personalized conversation</li>
+                <li>Click "Connect to HAL" to start the conversation</li>
+                <li>Speak naturally - HAL will respond in real-time</li>
+            </ol>
+        </div>
+
+        <!-- Footer -->
+        <div class="footer">
+            <p>Powered by <a href="https://pipecat.ai" target="_blank">Pipecat</a>
+            and <a href="https://daily.co" target="_blank">Daily.co</a></p>
+            <p>HAL 9000 voice by <a href="https://huggingface.co/campwill/HAL-9000-Piper-TTS" target="_blank">Piper TTS</a></p>
+        </div>
+    </div>
+
+    <!-- Daily.co call frame (hidden) -->
+    <div id="callFrame" style="display: none;"></div>
+
+    <script src="app.js"></script>
+</body>
+</html>
