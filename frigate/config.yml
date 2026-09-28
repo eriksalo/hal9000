@@ -1,0 +1,40 @@
+mqtt:
+  enabled: true
+  host: mqtt
+  port: 1883
+
+detectors:
+  cpu:
+    type: cpu
+    num_threads: 4
+
+cameras:
+  hal_camera:
+    enabled: true
+    ffmpeg:
+      inputs:
+        - path: /dev/video0
+          input_args:
+            - -f
+            - v4l2
+            - -input_format
+            - mjpeg
+            - -video_size
+            - 640x480
+            - -framerate
+            - "10"
+          roles:
+            - detect
+    detect:
+      enabled: true
+      width: 640
+      height: 480
+      fps: 5
+    objects:
+      track:
+        - person
+    snapshots:
+      enabled: true
+      bounding_box: true
+      retain:
+        default: 1

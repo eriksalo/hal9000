@@ -7,7 +7,19 @@
       "Bash(git --version:*)",
       "Bash(git init:*)",
       "Bash(git branch:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git config:*)",
+      "Bash(git commit:*)",
+      "Bash(git remote add:*)",
+      "Bash(git push:*)",
+      "Bash(pip show:*)",
+      "Bash(pip install:*)",
+      "Bash(start frontend/index.html)",
+      "Bash(python:*)",
+      "Bash(ssh:*)",
+      "Bash(timeout 60 ssh:*)",
+      "Bash(git pull:*)",
+      "Bash(sshpass:*)"
     ]
   }
 }

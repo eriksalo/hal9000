@@ -131,3 +131,68 @@ class FaceRecognitionService:
     def get_known_names(self):
         """Return list of known face names"""
         return list(self.known_faces.keys())
+
+    def recognize_all_faces(self, frame) -> list:
+        """
+        Recognize all faces in a frame and return their names and locations.
+
+        Returns: List of (name, location) tuples where location is (top, right, bottom, left)
+                 Unknown faces are returned with name "Unknown"
+        """
+        try:
+            # Convert BGR (OpenCV) to RGB (face_recognition)
+            rgb_frame = frame[:, :, ::-1]
+
+            # Make contiguous for face_recognition
+            rgb_frame = np.ascontiguousarray(rgb_frame, dtype=np.uint8)
+
+            # Use smaller frame for faster detection (proper resize, not array slicing)
+            import cv2
+            small_frame = cv2.resize(rgb_frame, (0, 0), fx=0.5, fy=0.5)
+            face_locations = face_recognition.face_locations(small_frame, model="hog")
+
+            # Scale locations back to original size
+            face_locations = [(top*2, right*2, bottom*2, left*2)
+                            for (top, right, bottom, left) in face_locations]
+
+            if not face_locations:
+                # Debug: print frame info when no faces found (every ~30 seconds)
+                import time
+                if not hasattr(self, '_last_no_face_log') or time.time() - self._last_no_face_log > 30:
+                    print(f"recognize_all_faces: no faces found in frame {small_frame.shape}")
+                    self._last_no_face_log = time.time()
+                return []
+            else:
+                print(f"recognize_all_faces: found {len(face_locations)} face(s)")
+
+            # Get encodings for all faces
+            face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
+
+            results = []
+            for face_encoding, face_location in zip(face_encodings, face_locations):
+                name = "Unknown"
+
+                if len(self.known_faces) > 0:
+                    # Compare to known faces
+                    known_names = list(self.known_faces.keys())
+                    known_encodings = list(self.known_faces.values())
+
+                    matches = face_recognition.compare_faces(
+                        known_encodings, face_encoding, tolerance=0.6
+                    )
+                    face_distances = face_recognition.face_distance(
+                        known_encodings, face_encoding
+                    )
+
+                    if True in matches:
+                        best_match_index = np.argmin(face_distances)
+                        if matches[best_match_index]:
+                            name = known_names[best_match_index]
+
+                results.append((name, face_location))
+
+            return results
+
+        except Exception as e:
+            print(f"Error recognizing all faces: {e}")
+            return []
