@@ -1,0 +1,16 @@
+name: remembers_fact
+scenarios:
+  - name: remembers_fact
+    turns:
+      - user: ""
+        expect:
+          - event: bot_stopped_speaking
+            within_ms: 20000
+      - user: "By the way, my dog is named Max and I just started a new job at a storage company."
+        expect:
+          - event: function_call
+            calls:
+              - name: remember
+            within_ms: 15000
+          - event: bot_started_speaking
+            within_ms: 15000

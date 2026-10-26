@@ -1,0 +1,21 @@
+[Unit]
+Description=HAL 9000 autonomous conversational agent
+After=network-online.target sound.target hal-piper.service
+Wants=network-online.target hal-piper.service
+
+[Service]
+Type=simple
+User=erik
+WorkingDirectory=/home/erik/hal9000/backend_pipecat
+EnvironmentFile=/home/erik/hal9000/backend_pipecat/.env
+Environment="PYTHONUNBUFFERED=1"
+ExecStart=/home/erik/hal9000/.venv/bin/python hal_autonomous.py
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hal
+
+[Install]
+WantedBy=multi-user.target

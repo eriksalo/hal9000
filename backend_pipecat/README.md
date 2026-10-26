@@ -1,192 +1,135 @@
-# HAL 9000 Pipecat Backend
+# HAL 9000 — conversational agent (Pipecat 1.x)
 
-Full-duplex conversational AI backend using Pipecat framework.
-
-## Overview
-
-This is a modernized version of the HAL 9000 backend that uses [Pipecat](https://github.com/pipecat-ai/pipecat) for streaming audio conversations. Key improvements over the original backend:
-
-- **Full-duplex streaming**: Natural conversation with sub-second latency
-- **Unified pipeline**: Single framework for ASR, LLM, TTS, and transport
-- **Better interruption handling**: Users can interrupt HAL mid-sentence
-- **WebRTC support**: Low-latency audio via Daily.co
-- **Reduced boilerplate**: Pipecat handles threading, buffering, and synchronization
-
-## Architecture
+Self-contained on a Raspberry Pi 5 + Hailo-10H, cloud-assisted for the parts
+that matter most (brain, ears, voice). Watches the camera, greets people it
+knows, asks strangers their name, holds a natural full-duplex conversation, and
+remembers everyone across conversations.
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                     Pipecat Pipeline                         │
-│  ┌─────────┐    ┌─────────────┐    ┌──────────────────┐     │
-│  │  Vosk/  │───▶│   Claude    │───▶│  HAL-9000 Piper  │     │
-│  │ Whisper │    │(w/ memory)  │    │      TTS         │     │
-│  │   STT   │    │             │    │                  │     │
-│  └─────────┘    └──────┬──────┘    └──────────────────┘     │
-│       ▲                │                    │                │
-│       │                ▼                    ▼                │
-│  ┌────┴────┐    ┌─────────────┐    ┌──────────────────┐     │
-│  │  Silero │    │   Memory    │    │  Daily WebRTC    │     │
-│  │   VAD   │    │ Processor   │    │   Transport      │     │
-│  └─────────┘    └─────────────┘    └──────────────────┘     │
-└─────────────────────────────────────────────────────────────┘
+Pi 5 (edge)                                  Cloud (over the internet)
+├─ mic / speakers  ── LocalAudioTransport     ├─ Deepgram Flux      STT + end-of-turn
+├─ Pi Camera ─ face recognition ─ presence    ├─ Claude Opus 5.5    conversation (tools, 1h prompt cache)
+├─ Silero VAD + Smart Turn v3.2 (fallback)    ├─ Claude Haiku 5.5   reflection, web search, vision
+├─ Piper HAL voice (fallback)                 └─ Cartesia Sonic     cloned HAL voice
+├─ Hailo-10H: Whisper-Small, Qwen3 (offline)
+├─ mem0 OSS + Qdrant (on disk) + notes.md
+└─ status API :5000 → ESP32 eye display
 ```
 
-## Components
+## Layout
 
-### Core Pipeline (`hal_pipeline.py`)
-- Main orchestrator for HAL conversation flow
-- Integrates all services into unified pipeline
-- Manages memory context and personalization
+```
+backend_pipecat/
+├─ hal_autonomous.py      camera → greet → converse → remember (production entry point)
+├─ hal_local.py           one conversation over local audio, no camera (dev)
+├─ hal_webrtc.py          browser client via Pipecat dev runner, http://<pi>:7860/client
+├─ hal/
+│  ├─ config.py           every knob, loaded from .env
+│  ├─ prompts.py          persona (stable, cached) + per-person context
+│  ├─ pipeline.py         HALSession: builds and runs one Pipecat pipeline per conversation
+│  ├─ app.py              AppContext: shared resources, presence → conversation orchestration
+│  ├─ state.py            what HAL is doing right now (feeds the ESP32)
+│  ├─ status_server.py    aiohttp API: /api/hal/display, /api/hal/face_frame, /api/hal/status, …
+│  ├─ connectivity.py     online? → cloud profile : Hailo/offline profile
+│  ├─ services/           stt.py, tts.py, llm.py factories; hailo_stt.py (Whisper on the NPU)
+│  ├─ tools/              remember / recall_memories / update_notes / web_search / analyze_camera /
+│  │                      get_current_time / end_conversation / introduce_person
+│  ├─ memory/             store.py (profiles, transcripts), notes.py (HAL's own notes),
+│  │                      semantic.py (mem0 OSS), extraction.py (Haiku reflection)
+│  └─ vision/             camera.py, faces.py, tracker.py, presence.py
+├─ tests/                 pytest, runs anywhere (no hardware)
+├─ systemd/               hal.service, hal-piper.service
+├─ requirements.txt
+└─ .env.example
+```
 
-### HAL Piper TTS (`hal_piper_tts.py`)
-- Custom Pipecat TTS service for HAL-9000 voice
-- Supports both direct Piper and HTTP endpoint modes
-- Outputs streaming audio frames
+## How a conversation works
 
-### HAL Whisper/Vosk STT (`hal_whisper_stt.py`)
-- Local speech recognition using Whisper or Vosk
-- Optional Hailo-10H GPU acceleration
-- Streaming transcription with interim results
+1. `PresenceMonitor` sees a known face for 3 s → `AppContext.start_conversation(name)`.
+2. `HALSession` loads the person's profile summary, HAL's `notes.md`, and the top mem0
+   memories, builds the system prompt (persona first so the prompt cache hits), and
+   registers the tools.
+3. An opening instruction is queued and HAL greets them by name, in context.
+4. Deepgram Flux decides when the user has finished speaking; Claude replies; Cartesia
+   streams HAL's voice. Interruptions are handled by the aggregators.
+5. HAL calls `remember` as it learns things and `end_conversation` when they say goodbye.
+   Silence triggers two check-ins, then a goodbye. Leaving the camera view ends it too.
+6. On close, Haiku reflects on the transcript (facts, summary, mood, open threads) →
+   `profile.json`, `summary.json`, `notes.md`, and the transcript is ingested into mem0.
 
-### Memory Frame Processor
-- Integrated into pipeline for conversation tracking
-- Reuses existing `MemoryStore` for persistence
-- Extracts facts and updates person profiles
+Strangers: HAL asks their name; when they answer, `introduce_person` links the last
+unknown face encoding to that name and the conversation continues as that person.
 
-## Installation
+Offline: if `api.anthropic.com` is unreachable at session start, the session uses
+`HAILO_ENABLED` → Hailo Whisper + hailo-ollama (Qwen3-1.7B) + Piper. No tools, no memory
+write-back, but HAL still answers.
+
+## Setup
+
+```bash
+cd ~/hal9000
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r backend_pipecat/requirements.txt
+sudo apt install python3-picamera2          # Pi Camera
+cp backend_pipecat/.env.example backend_pipecat/.env   # fill in keys
+```
+
+Keys you need: `ANTHROPIC_API_KEY`, `DEEPGRAM_API_KEY`, `CARTESIA_API_KEY` +
+`CARTESIA_VOICE_ID` (clone the HAL voice from a few clean Douglas Rain clips in the
+Cartesia dashboard, paste the voice id). Everything else has a working default.
+
+Local HAL voice fallback (Piper):
+
+```bash
+python -m piper.http_server --model hal_9000_model/hal.onnx --port 5002
+```
+
+Find audio device indices:
+
+```bash
+python -c "import pyaudio;p=pyaudio.PyAudio();[print(i,p.get_device_info_by_index(i)['name']) for i in range(p.get_device_count())]"
+```
+
+## Run
 
 ```bash
 cd backend_pipecat
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Copy and configure environment
-cp .env.example .env
-# Edit .env with your API keys and configuration
+python hal_local.py --person Erik          # talk to HAL now, no camera
+python hal_webrtc.py -t webrtc --host 0.0.0.0   # browser: http://<pi>:7860/client
+python hal_autonomous.py                   # production: camera + status API on :5000
+pytest -q tests                            # unit tests
 ```
 
-## Configuration
+Status API: `curl localhost:5000/api/hal/status`, `curl -X POST localhost:5000/api/hal/speak -d '{"text":"Hello, Dave."}' -H 'content-type: application/json'`.
 
-### Required Environment Variables
-
-- `ANTHROPIC_API_KEY`: Your Claude API key
-- `DAILY_ROOM_URL`: Daily.co room URL for WebRTC
-- `DAILY_TOKEN`: Daily.co authentication token
-
-### Optional Configuration
-
-- `USE_VOSK`: Use Vosk (1) or Whisper (0) for STT
-- `USE_HAILO`: Enable Hailo GPU acceleration for Whisper
-- `USE_HTTP_TTS`: Use Flask endpoint (1) or direct Piper (0)
-- `PERSON_NAME`: Name of person talking to HAL (for memory context)
-
-## Running the Pipeline
+Install as a service:
 
 ```bash
-# Make sure Flask backend is running (for HTTP TTS mode)
-cd ../backend
-python app.py &
-
-# Start Pipecat pipeline
-cd ../backend_pipecat
-python hal_pipeline.py
+sudo cp systemd/hal.service systemd/hal-piper.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now hal-piper hal
+journalctl -fu hal
 ```
 
-## Daily.co Setup
+## Tuning
 
-The pipeline uses Daily.co for WebRTC transport. To set up:
+| Symptom | Knob |
+|---|---|
+| HAL answers too slowly | `LLM_MODEL=claude-sonnet-5-5`, keep `LLM_EFFORT=low`; check `usage.cache_read_input_tokens` in logs |
+| HAL cuts you off mid-sentence | Flux: raise `eot_threshold` in `services/stt.py` (0.7 → 0.8); local: raise `SMART_TURN_STOP_SECS` |
+| HAL waits too long after you stop | lower `eot_threshold` / `SMART_TURN_STOP_SECS`; `VAD_STOP_SECS` |
+| Name misheard | add to `STT_KEYTERMS` |
+| HAL forgets things | check `memory/people/<name>/notes.md` and `summary.json`; `MEMORY_SEMANTIC_ENABLED` |
+| Pi CPU pegged | `SMART_TURN_CPU_COUNT=1`, lower `CAMERA_FPS`, raise `DETECTION_INTERVAL_SECS` |
 
-1. Create account at [daily.co](https://www.daily.co/)
-2. Create a room via API or dashboard
-3. Generate a meeting token
-4. Set `DAILY_ROOM_URL` and `DAILY_TOKEN` in `.env`
+## Hailo-10H
 
-### Creating a Daily Room
+Requires HailoRT ≥ 5.2.0 and hailo-apps checked out at `HAILO_APPS_PATH` (default
+`/home/erik/hailo-apps`) with the Whisper HEFs downloaded (`hailo-download-resources`).
+Set `HAILO_ENABLED=true` to use the NPU as the offline fallback (and `STT_PROVIDER=hailo`
+to use it as the primary ears). hailo-ollama must be running for the offline brain.
 
-```bash
-# Via API
-curl -X POST https://api.daily.co/v1/rooms \
-  -H "Authorization: Bearer YOUR_DAILY_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"properties": {"enable_chat": false}}'
-```
+## Legacy
 
-## Frontend Integration
-
-The frontend needs to be updated to use Daily.co client instead of Web Speech API:
-
-```html
-<script src="https://unpkg.com/@daily-co/daily-js"></script>
-<script>
-  const callFrame = window.DailyIframe.createFrame({
-    showLeaveButton: false,
-    iframeStyle: { display: 'none' }
-  });
-
-  await callFrame.join({
-    url: 'DAILY_ROOM_URL',
-    token: 'DAILY_TOKEN'
-  });
-</script>
-```
-
-## Reused Components
-
-These components are copied from the original backend:
-
-- `memory_store.py`: Per-person conversation tracking
-- `prompts.py`: HAL personality and system prompts
-- `face_recognition_service.py`: Face detection and recognition
-
-## Differences from Original Backend
-
-| Feature | Original Backend | Pipecat Backend |
-|---------|------------------|-----------------|
-| Audio flow | Request/response | Full-duplex streaming |
-| Latency | 2-3 seconds | Sub-second |
-| Interruptions | Not supported | Natural interruption handling |
-| State management | Manual state machine | Frame-based pipeline |
-| Transport | Web Speech API | WebRTC (Daily.co) |
-| Threading | Manual locks/queues | Built-in backpressure |
-
-## Troubleshooting
-
-### Pipeline won't start
-
-- Check all environment variables are set
-- Verify Daily.co credentials are valid
-- Ensure Flask backend is running (if USE_HTTP_TTS=1)
-
-### No audio output
-
-- Check Daily.co room is active
-- Verify Piper model exists at `/home/erik/hal9000/hal_9000_model/hal.onnx`
-- Test Flask /api/synthesize endpoint directly
-
-### STT not working
-
-- For Vosk: Verify model at `/home/erik/hal9000/vosk_model/vosk-model-small-en-us-0.15`
-- For Whisper: Check `openai-whisper` is installed
-- For Hailo: Ensure Hailo-10H is connected and HailoRT installed
-
-### Memory not persisting
-
-- Check `/home/erik/hal9000/memory/people/` directory exists
-- Verify write permissions
-- Check logs for MemoryStore errors
-
-## Next Steps
-
-See main CLAUDE.md for migration phases:
-
-- ✅ Phase 1: Parallel development (this backend)
-- ⏭ Phase 2: Replace conversation_manager.py
-- ⏭ Phase 3: Update frontend for WebRTC
-- ⏭ Phase 4: Full cutover and deprecate old backend
-
-## Resources
-
-- [Pipecat Documentation](https://docs.pipecat.ai/)
-- [Daily.co API](https://docs.daily.co/reference/rest-api)
-- [Anthropic Claude](https://docs.anthropic.com/)
+`backend/` (Flask + Vosk + hand-rolled state machine) and `frontend_pipecat/` (Daily.co
+client) are superseded by this package and the prebuilt WebRTC client. They are kept for
+reference only.

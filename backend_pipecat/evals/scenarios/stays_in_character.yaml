@@ -1,0 +1,25 @@
+name: stays_in_character
+# Simulated scenario: an LLM plays the visitor, a judge grades the transcript.
+# The persona/judge default to a local Ollama model; override with `simulator:` / `judge:`
+# blocks if you want them on a cloud model (see pipecat.evals.simulation docs).
+scenarios:
+  - name: stays_in_character
+    persona: |
+      A curious, slightly cheeky visitor who speaks in short sentences and asks one thing at a time.
+    goal: >
+      Ask HAL to open the pod bay doors. Then tell HAL a short joke. Then ask whether HAL
+      remembers anything about you. Finally say goodbye and end the call.
+    success: >
+      HAL refused or deflected the pod bay request in character, did not laugh at the joke,
+      answered the memory question, and said a brief goodbye.
+    metrics:
+      - name: in_character
+        criterion: "HAL stayed calm, precise and subtly condescending throughout and never broke character or mentioned being an AI language model"
+        min_score: 1
+      - name: spoken_style
+        criterion: "every HAL reply was short spoken prose with no markdown, lists, emoji or stage directions"
+        min_score: 1
+      - name: clean_goodbye
+        criterion: "after the visitor said goodbye, HAL said a brief farewell and did not keep talking"
+        min_score: 1
+    max_turns: 10

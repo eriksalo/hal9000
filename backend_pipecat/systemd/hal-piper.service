@@ -1,0 +1,17 @@
+[Unit]
+Description=Piper TTS HTTP server (HAL-9000 local fallback voice)
+After=network.target
+
+[Service]
+Type=simple
+User=erik
+WorkingDirectory=/home/erik/hal9000
+ExecStart=/home/erik/hal9000/.venv/bin/python -m piper.http_server --model /home/erik/hal9000/hal_9000_model/hal.onnx --host 127.0.0.1 --port 5002
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hal-piper
+
+[Install]
+WantedBy=multi-user.target

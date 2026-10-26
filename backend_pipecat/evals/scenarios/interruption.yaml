@@ -1,0 +1,19 @@
+name: interruption
+scenarios:
+  - name: interruption
+    turns:
+      - user: ""
+        expect:
+          - event: bot_stopped_speaking
+            within_ms: 20000
+      - user: "Tell me, in as much detail as you can, the complete history of the Discovery One mission and everything that happened on it."
+        expect:
+          - event: bot_started_speaking
+            within_ms: 10000
+      # Barge in while HAL is still talking; HAL must stop and yield the floor.
+      - user: "Stop. Just tell me the short version."
+        expect:
+          - event: bot_stopped_speaking
+            within_ms: 3000
+          - event: bot_started_speaking
+            within_ms: 8000

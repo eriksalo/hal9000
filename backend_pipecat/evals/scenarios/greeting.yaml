@@ -1,0 +1,17 @@
+name: greeting
+scenarios:
+  - name: greeting
+    # HAL speaks first (opening instruction) and must not need a user turn to do so.
+    turns:
+      - user: ""
+        expect:
+          - event: bot_started_speaking
+            within_ms: 8000
+          - event: bot_stopped_speaking
+            within_ms: 20000
+      - user: "I'm doing fine, thank you."
+        expect:
+          - event: user_transcription
+            text_contains: "fine"
+          - event: bot_started_speaking
+            within_ms: 6000

@@ -6,8 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 HAL 9000 is a sophisticated voice-interactive AI system inspired by the AI from "2001: A Space Odyssey". The project combines speech synthesis, recognition, computer vision, face recognition, and conversational AI with a physical round display showing an animated HAL eye.
 
-**Current State**: Simple TTS web app with autonomous face recognition and conversation capabilities
-**Target State**: Full-duplex conversational voice agent with natural turn-taking, internet access, and persistent memory
+**Current State (Oct 2026)**: `backend_pipecat/` is the live system — Pipecat 1.14 full-duplex pipeline on the Pi 5 + Hailo-10H, cloud-assisted (Deepgram Flux STT, Claude Opus 5.5, Cartesia HAL voice clone), layered memory (per-person files + HAL's own notes + mem0 OSS), face-driven autonomous conversations, offline Hailo fallback. See `backend_pipecat/README.md`.
+**Legacy**: `backend/` (Flask + Vosk + hand-rolled state machine) and `frontend_pipecat/` (Daily.co client) are kept for reference only.
+
+**Deployment constraint**: HAL must be self-contained on the Pi (CPU + Hailo) with internet access. No homelab/Proxmox dependency; cloud APIs are fine.
 
 ## Architecture Overview
 
@@ -57,24 +59,29 @@ ESP32-S3 Round Display (480x480)
 
 ## Development Commands
 
-### Running the Current System
+### Running the Current System (backend_pipecat)
 
 ```bash
-# Start Flask backend
-cd backend
-python app.py                    # Runs on http://localhost:5000
+cd backend_pipecat
+cp .env.example .env             # ANTHROPIC_API_KEY, DEEPGRAM_API_KEY, CARTESIA_API_KEY/VOICE_ID
+pip install -r requirements.txt
 
-# Start HAL controller (autonomous mode)
-cd backend
-python hal_controller.py         # Face detection + conversation loop
+python hal_local.py --person Erik            # dev: one conversation over local audio, no camera
+python hal_webrtc.py -t webrtc --host 0.0.0.0 # dev: browser client at http://<pi>:7860/client
+python hal_autonomous.py                     # production: camera → greet → converse; status API on :5000
+pytest -q tests                              # unit tests (no hardware needed)
 
-# Open frontend
-# Option 1: Direct file
-open frontend/index.html
+# Local HAL voice fallback (Piper HTTP server, used when TTS_PROVIDER=piper or offline)
+python -m piper.http_server --model ../hal_9000_model/hal.onnx --port 5002
+```
 
-# Option 2: HTTP server
-cd frontend
-python -m http.server 8080       # Then visit http://localhost:8080
+Validate against a real Pipecat install before claiming an API works: the package pins `pipecat-ai>=1.14,<2`; service constructors take `settings=Service.Settings(...)` objects (the old `model=`/`params=` kwargs are deprecated and removed in 2.0).
+
+### Legacy Flask system (reference only)
+
+```bash
+cd backend && python app.py          # Flask on :5000 (conflicts with the new status server port)
+cd backend && python hal_controller.py
 ```
 
 ### ESP32 Display (Optional)

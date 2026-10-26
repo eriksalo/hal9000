@@ -1,0 +1,18 @@
+# Pipecat behavioral evals for HAL.
+#   cd backend_pipecat && pipecat eval suite evals/manifest.yaml
+# Spawns hal_webrtc.py on a free port and drives it with synthetic speech
+# (needs the same .env keys as a real conversation; uses real STT/LLM/TTS).
+concurrency: 1
+repeat: 1
+runs_dir: evals/runs
+record: false
+scenarios_dir: scenarios
+spawn: "{python} {bot} -t webrtc --port {port}"
+suite:
+  - bot: hal_webrtc.py
+    scenarios:
+      - greeting
+      - remembers_fact
+      - goodbye_ends_conversation
+      - interruption
+      - stays_in_character

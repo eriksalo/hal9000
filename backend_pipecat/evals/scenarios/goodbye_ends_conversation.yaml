@@ -1,0 +1,18 @@
+name: goodbye_ends_conversation
+scenarios:
+  - name: goodbye_ends_conversation
+    turns:
+      - user: ""
+        expect:
+          - event: bot_stopped_speaking
+            within_ms: 20000
+      - user: "Alright HAL, I have to go now. Goodbye."
+        expect:
+          - event: function_call
+            calls:
+              - name: end_conversation
+            within_ms: 15000
+          - event: bot_started_speaking
+            within_ms: 15000
+          - event: bot_stopped_speaking
+            within_ms: 20000

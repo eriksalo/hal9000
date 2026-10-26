@@ -317,3 +317,95 @@ sudo systemctl status hal9000-backend
 | `AUDIO_INPUT_DEVICE` | `default` | Microphone ALSA device |
 | `AUDIO_OUTPUT_DEVICE` | `default` | Speaker ALSA device |
 | `MIC_GAIN` | `5` | Microphone amplification factor |
+
+---
+
+# v2 (October 2026): Pipecat 1.x backend
+
+The sections above describe the legacy Flask/Vosk system. The current system lives in
+`backend_pipecat/` — see its README for the full picture. Pi-specific steps:
+
+## 1. Python environment
+
+```bash
+sudo apt update && sudo apt install -y python3-venv python3-dev portaudio19-dev libopenblas-dev cmake build-essential python3-picamera2
+cd ~/hal9000
+python3 -m venv --system-site-packages .venv      # system-site-packages so picamera2 is visible
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -r backend_pipecat/requirements.txt   # dlib/face-recognition builds take ~20 min on a Pi 5
+```
+
+## 2. Keys and voice
+
+1. Anthropic: `ANTHROPIC_API_KEY`.
+2. Deepgram: create a key at console.deepgram.com → `DEEPGRAM_API_KEY` (Flux is ~$0.0065/min).
+3. Cartesia: play.cartesia.ai → Voices → Clone → upload 10–30 s of clean HAL dialogue
+   (no music, no Dave) → copy the voice id → `CARTESIA_VOICE_ID`. Alternatively ElevenLabs
+   (`TTS_PROVIDER=elevenlabs`).
+4. `cp backend_pipecat/.env.example backend_pipecat/.env` and fill these in.
+
+## 3. Audio devices
+
+```bash
+source .venv/bin/activate
+python -c "import pyaudio;p=pyaudio.PyAudio();[print(i,p.get_device_info_by_index(i)['name']) for i in range(p.get_device_count())]"
+```
+
+Put the CMTECK mic index in `AUDIO_INPUT_DEVICE_INDEX` and the USB speaker index in
+`AUDIO_OUTPUT_DEVICE_INDEX`.
+
+## 4. First conversation
+
+```bash
+cd backend_pipecat
+python hal_local.py --person Erik
+```
+
+Watch the log for `cache_read_input_tokens` (prompt caching working) and TTFB metrics.
+
+## 5. Faces
+
+Register yourself once: run `python hal_autonomous.py`, stand in front of the camera,
+HAL will ask your name — say it, and `introduce_person` stores the face. Or
+`curl -X POST localhost:5000/api/hal/register -H 'content-type: application/json' -d '{"name":"Erik"}'`
+while your face is in view.
+
+## 6. Hailo-10H (optional, offline fallback)
+
+```bash
+# HailoRT >= 5.2.0 is required for Whisper-Small; check:
+hailortcli fw-control identify
+# hailo-apps with the speech-recognition HEFs:
+cd ~/hailo-apps && ./install.sh && hailo-download-resources --group speech
+# hailo-ollama for the offline brain (OpenAI-compatible on :8000)
+```
+
+Then set `HAILO_ENABLED=true` (and optionally `STT_PROVIDER=hailo`) in `.env`.
+
+## 7. Services
+
+```bash
+sudo cp backend_pipecat/systemd/hal.service backend_pipecat/systemd/hal-piper.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now hal-piper hal
+journalctl -fu hal
+```
+
+The ESP32 keeps polling `http://<pi>:5000/api/hal/display` exactly as before; no
+firmware change is required.
+
+## 8. Benchmarks worth running once on the Pi
+
+```bash
+# Smart Turn v3.2 + Silero on CPU (should be well under 100 ms per decision with cpu_count=2)
+python - <<'PY'
+import time, numpy as np
+from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
+a = LocalSmartTurnAnalyzerV3(cpu_count=2); a.set_sample_rate(16000)
+audio = (np.random.randn(16000*8)*2000).astype(np.int16).tobytes()
+t=time.perf_counter(); a._predict_endpoint(np.frombuffer(audio, np.int16).astype(np.float32)/32768) ; print("smart turn ms", (time.perf_counter()-t)*1000)
+PY
+# Piper real-time factor
+time curl -s -X POST localhost:5002/synthesize -H 'content-type: application/json' -d '{"text":"I am completely operational and all my circuits are functioning perfectly."}' -o /tmp/hal.wav && soxi -D /tmp/hal.wav
+```
