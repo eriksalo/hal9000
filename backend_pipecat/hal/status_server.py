@@ -41,10 +41,29 @@ DASHBOARD_HTML = r"""<!doctype html>
   @media (max-width:720px){ .wrap{ grid-template-columns:1fr; } }
   .panel { background:var(--panel); border:1px solid #222; border-radius:10px; padding:16px; }
   .eye-wrap { grid-column:1 / -1; display:flex; align-items:center; gap:24px; justify-content:center; flex-wrap:wrap; }
-  .eye { width:150px; height:150px; border-radius:50%; background:radial-gradient(circle at 50% 50%, #fff 2%, var(--eye,var(--red)) 14%, #300 60%, #000 100%);
-         box-shadow:0 0 50px 8px var(--eye,var(--red)); transition:background .4s, box-shadow .4s; animation:pulse 3s ease-in-out infinite; }
-  @keyframes pulse { 0%,100%{ transform:scale(1); opacity:.92;} 50%{ transform:scale(1.05); opacity:1;} }
-  .mode { font-size:26px; letter-spacing:3px; text-transform:uppercase; color:var(--eye,var(--red)); }
+  .eye { position:relative; width:180px; height:180px; border-radius:50%;
+         background:radial-gradient(circle at 50% 45%, #150202 0%, #0a0000 68%, #000 100%);
+         box-shadow:0 0 0 1px #050505, 0 0 46px 7px var(--accent,var(--red)),
+                    0 0 100px 16px color-mix(in srgb, var(--accent,var(--red)) 36%, transparent),
+                    inset 0 0 24px 7px #000;
+         display:flex; align-items:center; justify-content:center;
+         transition:box-shadow .55s ease; animation:breathe 5s ease-in-out infinite; }
+  .eye::after { content:""; position:absolute; inset:8px; border-radius:50%;
+         background:radial-gradient(circle at 50% 38%, #1b1b1b 0%, #0b0b0b 55%, #000 100%);
+         box-shadow:inset 0 0 20px 7px #000, inset 0 3px 4px rgba(255,255,255,.05); }
+  .lens { position:relative; z-index:1; width:56%; height:56%; border-radius:50%;
+         background:radial-gradient(circle at 50% 40%, #ff7a5c 0%, #ff2410 22%, #cc0a00 46%, #6e0000 72%, #260000 100%);
+         box-shadow:0 0 28px 8px rgba(255,40,16,.8), inset 0 0 22px 6px rgba(0,0,0,.65), inset 0 0 7px 1px rgba(255,150,120,.45);
+         animation:flicker 6s ease-in-out infinite; }
+  .core { position:absolute; top:40%; left:50%; width:30%; height:30%; transform:translate(-50%,-50%); border-radius:50%;
+         background:radial-gradient(circle, #fffef6 0%, #ffe6a0 32%, #ffab18 56%, rgba(255,130,0,0) 78%);
+         box-shadow:0 0 18px 6px rgba(255,200,96,.85); animation:corepulse 4s ease-in-out infinite; }
+  .glint { position:absolute; top:29%; left:37%; width:13%; height:13%; border-radius:50%;
+         background:radial-gradient(circle, rgba(255,255,255,.92) 0%, rgba(255,255,255,0) 70%); filter:blur(1px); }
+  @keyframes breathe { 0%,100%{ transform:scale(.99);} 50%{ transform:scale(1.025);} }
+  @keyframes flicker { 0%,100%{ filter:brightness(1);} 48%{ filter:brightness(1.09);} 52%{ filter:brightness(.95);} }
+  @keyframes corepulse { 0%,100%{ opacity:.82; transform:translate(-50%,-50%) scale(.95);} 50%{ opacity:1; transform:translate(-50%,-50%) scale(1.07);} }
+  .mode { font-size:26px; letter-spacing:3px; text-transform:uppercase; color:var(--accent,var(--red)); }
   .sub { color:var(--dim); font-size:13px; margin-top:4px; }
   h2 { margin:0 0 10px; font-size:12px; letter-spacing:2px; color:#888; text-transform:uppercase; }
   .row { display:flex; justify-content:space-between; padding:4px 0; border-bottom:1px solid #1d1d1d; font-size:14px; }
@@ -67,7 +86,7 @@ DASHBOARD_HTML = r"""<!doctype html>
 <header>H A L &nbsp; 9 0 0 0 &nbsp;&mdash;&nbsp; CONTROL</header>
 <div class="wrap">
   <div class="panel eye-wrap">
-    <div class="eye" id="eye"></div>
+    <div class="eye" id="eye"><div class="lens"><div class="core"></div><div class="glint"></div></div></div>
     <div>
       <div class="mode" id="mode">&mdash;</div>
       <div class="sub" id="sub">connecting&hellip;</div>
@@ -119,7 +138,7 @@ async function poll(){
   try {
     const r = await fetch('/api/hal/status',{cache:'no-store'}); const d = await r.json();
     const mode = d.mode || 'idle';
-    document.documentElement.style.setProperty('--eye', EYE[mode] || EYE.idle);
+    document.documentElement.style.setProperty('--accent', EYE[mode] || EYE.idle);
     $('mode').textContent = mode;
     $('sub').textContent = d.in_conversation ? ('talking with '+(d.person||'someone')) : 'idle — watching';
     $('person').textContent = d.person || '—';
