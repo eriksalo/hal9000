@@ -10,6 +10,7 @@
 
 #include <Arduino.h>
 #include <WiFi.h>
+#include <ESPmDNS.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <esp_display_panel.hpp>
@@ -168,6 +169,27 @@ void setup()
         Serial.println("\nWiFi connected!");
         Serial.print("IP: ");
         Serial.println(WiFi.localIP());
+
+        // If the backend host is an mDNS name (e.g. "hal9000.local"), resolve it
+        // to the Pi's current IP so the display keeps working across DHCP changes.
+        // Requires avahi-daemon running on the Pi. Falls back to the name as-is.
+        if (api_host.endsWith(".local")) {
+            String mdnsName = api_host.substring(0, api_host.length() - 6); // strip ".local"
+            MDNS.begin("hal-display");
+            IPAddress halIP;
+            for (int attempt = 0; attempt < 10; attempt++) {
+                halIP = MDNS.queryHost(mdnsName, 2000);
+                if (halIP != IPAddress(0, 0, 0, 0)) break;
+                Serial.printf("Resolving %s.local (attempt %d)...\n", mdnsName.c_str(), attempt + 1);
+                delay(500);
+            }
+            if (halIP != IPAddress(0, 0, 0, 0)) {
+                api_host = halIP.toString();
+                Serial.printf("Resolved HAL to %s\n", api_host.c_str());
+            } else {
+                Serial.println("mDNS resolution failed; using configured host as-is");
+            }
+        }
         Serial.printf("Backend URL: http://%s:%d/api/hal/display\n", api_host.c_str(), api_port);
 
         lvgl_port_lock(-1);
