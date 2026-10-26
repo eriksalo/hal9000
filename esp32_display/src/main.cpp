@@ -36,7 +36,10 @@ using namespace esp_panel::board;
 #define EYE_RING_4_RADIUS   90
 #define EYE_INNER_RADIUS    75
 #define EYE_CENTER_RADIUS   30
-#define EYE_HIGHLIGHT_RADIUS 12
+#define EYE_HIGHLIGHT_RADIUS 13
+#define EYE_NUM_RINGS       22
+#define EYE_R_EDGE          150
+#define EYE_R_CORE          30
 
 // Display modes
 enum DisplayMode {
@@ -46,13 +49,10 @@ enum DisplayMode {
 
 // LVGL objects for HAL eye layers (outer to inner)
 static lv_obj_t *outer_glow = NULL;
-static lv_obj_t *ring_1 = NULL;
-static lv_obj_t *ring_2 = NULL;
-static lv_obj_t *ring_3 = NULL;
-static lv_obj_t *ring_4 = NULL;
-static lv_obj_t *main_eye = NULL;
+static lv_obj_t *rings[EYE_NUM_RINGS] = {NULL};
 static lv_obj_t *center_yellow = NULL;
 static lv_obj_t *center_highlight = NULL;
+static lv_obj_t *center_glint = NULL;
 static lv_obj_t *status_label = NULL;
 
 // Face display objects
@@ -239,76 +239,48 @@ void create_hal_eye(void)
     lv_obj_set_style_radius(outer_glow, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_border_width(outer_glow, 0, 0);
 
-    // Gradient ring 1 (dark red)
-    ring_1 = lv_obj_create(lv_scr_act());
-    lv_obj_remove_style_all(ring_1);
-    lv_obj_set_size(ring_1, EYE_RING_1_RADIUS * 2, EYE_RING_1_RADIUS * 2);
-    lv_obj_align(ring_1, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_set_style_bg_color(ring_1, lv_color_make(80, 0, 0), 0);
-    lv_obj_set_style_bg_opa(ring_1, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(ring_1, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_border_width(ring_1, 0, 0);
+    // Lens: many concentric circles forming a smooth radial gradient (outer -> inner).
+    for (int i = 0; i < EYE_NUM_RINGS; i++) {
+        float t = (float)i / (EYE_NUM_RINGS - 1);              // 0 = edge, 1 = inner
+        int radius = (int)(EYE_R_EDGE - (EYE_R_EDGE - EYE_R_CORE) * t);
+        rings[i] = lv_obj_create(lv_scr_act());
+        lv_obj_remove_style_all(rings[i]);
+        lv_obj_set_size(rings[i], radius * 2, radius * 2);
+        lv_obj_align(rings[i], LV_ALIGN_CENTER, 0, 0);
+        lv_obj_set_style_bg_opa(rings[i], LV_OPA_COVER, 0);
+        lv_obj_set_style_radius(rings[i], LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_border_width(rings[i], 0, 0);
+    }
 
-    // Gradient ring 2
-    ring_2 = lv_obj_create(lv_scr_act());
-    lv_obj_remove_style_all(ring_2);
-    lv_obj_set_size(ring_2, EYE_RING_2_RADIUS * 2, EYE_RING_2_RADIUS * 2);
-    lv_obj_align(ring_2, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_set_style_bg_color(ring_2, lv_color_make(120, 0, 0), 0);
-    lv_obj_set_style_bg_opa(ring_2, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(ring_2, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_border_width(ring_2, 0, 0);
-
-    // Gradient ring 3
-    ring_3 = lv_obj_create(lv_scr_act());
-    lv_obj_remove_style_all(ring_3);
-    lv_obj_set_size(ring_3, EYE_RING_3_RADIUS * 2, EYE_RING_3_RADIUS * 2);
-    lv_obj_align(ring_3, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_set_style_bg_color(ring_3, lv_color_make(160, 0, 0), 0);
-    lv_obj_set_style_bg_opa(ring_3, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(ring_3, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_border_width(ring_3, 0, 0);
-
-    // Gradient ring 4
-    ring_4 = lv_obj_create(lv_scr_act());
-    lv_obj_remove_style_all(ring_4);
-    lv_obj_set_size(ring_4, EYE_RING_4_RADIUS * 2, EYE_RING_4_RADIUS * 2);
-    lv_obj_align(ring_4, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_set_style_bg_color(ring_4, lv_color_make(190, 0, 0), 0);
-    lv_obj_set_style_bg_opa(ring_4, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(ring_4, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_border_width(ring_4, 0, 0);
-
-    // Main inner eye circle (brightest red)
-    main_eye = lv_obj_create(lv_scr_act());
-    lv_obj_remove_style_all(main_eye);
-    lv_obj_set_size(main_eye, EYE_INNER_RADIUS * 2, EYE_INNER_RADIUS * 2);
-    lv_obj_align(main_eye, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_set_style_bg_color(main_eye, lv_color_make(220, 0, 0), 0);
-    lv_obj_set_style_bg_opa(main_eye, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(main_eye, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_border_color(main_eye, lv_color_make(255, 50, 0), 0);
-    lv_obj_set_style_border_width(main_eye, 2, 0);
-
-    // Center yellow/orange spot
+    // Gold halo at the center of the lens
     center_yellow = lv_obj_create(lv_scr_act());
     lv_obj_remove_style_all(center_yellow);
     lv_obj_set_size(center_yellow, EYE_CENTER_RADIUS * 2, EYE_CENTER_RADIUS * 2);
     lv_obj_align(center_yellow, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_set_style_bg_color(center_yellow, lv_color_make(255, 180, 0), 0);
+    lv_obj_set_style_bg_color(center_yellow, lv_color_make(255, 205, 70), 0);
     lv_obj_set_style_bg_opa(center_yellow, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(center_yellow, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_border_width(center_yellow, 0, 0);
 
-    // Center highlight (white reflection)
+    // White-hot core
     center_highlight = lv_obj_create(lv_scr_act());
     lv_obj_remove_style_all(center_highlight);
     lv_obj_set_size(center_highlight, EYE_HIGHLIGHT_RADIUS * 2, EYE_HIGHLIGHT_RADIUS * 2);
-    lv_obj_align(center_highlight, LV_ALIGN_CENTER, -4, -4);
-    lv_obj_set_style_bg_color(center_highlight, lv_color_white(), 0);
-    lv_obj_set_style_bg_opa(center_highlight, LV_OPA_80, 0);
+    lv_obj_align(center_highlight, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_style_bg_color(center_highlight, lv_color_make(255, 250, 235), 0);
+    lv_obj_set_style_bg_opa(center_highlight, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(center_highlight, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_border_width(center_highlight, 0, 0);
+
+    // Small specular glint, offset up-left (gives the lens depth)
+    center_glint = lv_obj_create(lv_scr_act());
+    lv_obj_remove_style_all(center_glint);
+    lv_obj_set_size(center_glint, 11, 11);
+    lv_obj_align(center_glint, LV_ALIGN_CENTER, -9, -10);
+    lv_obj_set_style_bg_color(center_glint, lv_color_white(), 0);
+    lv_obj_set_style_bg_opa(center_glint, LV_OPA_80, 0);
+    lv_obj_set_style_radius(center_glint, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_border_width(center_glint, 0, 0);
 
     // Create status label
     status_label = lv_label_create(lv_scr_act());
@@ -386,19 +358,25 @@ void update_hal_eye(lv_timer_t *timer)
     // Update glow color
     lv_obj_set_style_bg_color(outer_glow, lv_color_make((uint8_t)(40 * brightness), 0, 0), 0);
 
-    // Update ring colors with gradient based on state
-    lv_obj_set_style_bg_color(ring_1, lv_color_make((uint8_t)(base_r * 0.35f * brightness), (uint8_t)(base_g * 0.35f * brightness), 0), 0);
-    lv_obj_set_style_bg_color(ring_2, lv_color_make((uint8_t)(base_r * 0.50f * brightness), (uint8_t)(base_g * 0.50f * brightness), 0), 0);
-    lv_obj_set_style_bg_color(ring_3, lv_color_make((uint8_t)(base_r * 0.70f * brightness), (uint8_t)(base_g * 0.70f * brightness), 0), 0);
-    lv_obj_set_style_bg_color(ring_4, lv_color_make((uint8_t)(base_r * 0.85f * brightness), (uint8_t)(base_g * 0.85f * brightness), 0), 0);
-    lv_obj_set_style_bg_color(main_eye, lv_color_make((uint8_t)(base_r * brightness), (uint8_t)(base_g * brightness), 0), 0);
+    // Hot inner color by state (HAL stays in the red family; movie-accurate).
+    float hotR, hotG;
+    if (hal_listening)      { hotR = 255; hotG = 40; }   // bright, alert
+    else if (hal_speaking)  { hotR = 255; hotG = 95; }   // warm orange
+    else                    { hotR = 235; hotG = 24; }   // deep idle red
 
-    // Update border glow
-    lv_obj_set_style_border_color(main_eye, lv_color_make(255, (uint8_t)(50 + pulse * 30), 0), 0);
+    // Colour each lens ring along a smooth radial falloff (rim dark -> core hot).
+    for (int i = 0; i < EYE_NUM_RINGS; i++) {
+        float t = (float)i / (EYE_NUM_RINGS - 1);        // 0 edge -> 1 inner
+        float f = (0.10f + 0.90f * powf(t, 1.6f)) * brightness;
+        uint8_t r = (uint8_t)fminf(255.0f, hotR * f);
+        uint8_t g = (uint8_t)fminf(255.0f, hotG * f);
+        lv_obj_set_style_bg_color(rings[i], lv_color_make(r, g, 0), 0);
+    }
 
-    // Subtle center yellow/white pulsing
-    uint8_t yellow_g = 180 + (uint8_t)(pulse * 40);
-    lv_obj_set_style_bg_color(center_yellow, lv_color_make(255, yellow_g, 0), 0);
+    // Gold halo + white-hot core breathe gently with the pulse.
+    uint8_t halo_g = 190 + (uint8_t)(pulse * 45);
+    lv_obj_set_style_bg_color(center_yellow, lv_color_make(255, halo_g, (uint8_t)(55 + pulse * 35)), 0);
+    lv_obj_set_style_bg_opa(center_highlight, (lv_opa_t)(220 + (int)(pulse * 35)), 0);
 }
 
 void check_display_state(void)
@@ -477,13 +455,10 @@ void show_eye_mode(void)
 {
     // Show eye objects
     lv_obj_clear_flag(outer_glow, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_clear_flag(ring_1, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_clear_flag(ring_2, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_clear_flag(ring_3, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_clear_flag(ring_4, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_clear_flag(main_eye, LV_OBJ_FLAG_HIDDEN);
+    for (int i = 0; i < EYE_NUM_RINGS; i++) lv_obj_clear_flag(rings[i], LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(center_yellow, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(center_highlight, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(center_glint, LV_OBJ_FLAG_HIDDEN);
 
     // Hide face canvas
     if (face_canvas) {
@@ -497,13 +472,10 @@ void show_face_mode(void)
 {
     // Hide eye objects
     lv_obj_add_flag(outer_glow, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(ring_1, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(ring_2, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(ring_3, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(ring_4, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(main_eye, LV_OBJ_FLAG_HIDDEN);
+    for (int i = 0; i < EYE_NUM_RINGS; i++) lv_obj_add_flag(rings[i], LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(center_yellow, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(center_highlight, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(center_glint, LV_OBJ_FLAG_HIDDEN);
 
     // Show face canvas
     if (face_canvas) {
