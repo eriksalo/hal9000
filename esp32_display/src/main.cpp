@@ -290,7 +290,7 @@ void create_hal_eye(void)
     lv_obj_align(status_label, LV_ALIGN_BOTTOM_MID, 0, -30);
 
     // Create animation timer
-    lv_timer_create(update_hal_eye, 33, NULL);  // ~30fps
+    lv_timer_create(update_hal_eye, 25, NULL);  // ~30fps
 }
 
 void create_face_display(void)
@@ -316,67 +316,60 @@ void create_face_display(void)
 
 void update_hal_eye(lv_timer_t *timer)
 {
-    // Skip animation if in face mode
     if (current_mode == MODE_FACE) return;
 
-    // Sinusoidal pulse calculation
-    float pulse_speed = 0.002f;  // Normal idle speed
-    if (hal_listening) {
-        pulse_speed = 0.006f;  // Faster when listening
-    } else if (hal_speaking) {
-        pulse_speed = 0.004f;  // Medium when speaking
+    float ms = (float)millis();
+
+    // State drives the character of the animation.
+    float breatheSpeed, waveSpeed, waveFreq, glintSpeed, hotR, hotG;
+    if (hal_listening) {        // alert: quick shimmer, brighter
+        breatheSpeed = 0.0016f; waveSpeed = 0.0100f; waveFreq = 7.0f; glintSpeed = 0.0022f; hotR = 255; hotG = 44;
+    } else if (hal_speaking) {  // warm orange, pulsing like speech
+        breatheSpeed = 0.0024f; waveSpeed = 0.0140f; waveFreq = 5.0f; glintSpeed = 0.0017f; hotR = 255; hotG = 100;
+    } else {                    // idle: slow, deep, calm
+        breatheSpeed = 0.0011f; waveSpeed = 0.0055f; waveFreq = 6.0f; glintSpeed = 0.0009f; hotR = 232; hotG = 22;
     }
 
-    // Smooth sinusoidal pulse (0.0 to 1.0)
-    float pulse = (sin(millis() * pulse_speed) * 0.5f) + 0.5f;
+    // Slow overall breathing.
+    float breathe = 0.5f + 0.5f * sinf(ms * breatheSpeed);
+    float brightness = 0.72f + 0.28f * breathe;
 
-    // Base colors based on state
-    uint8_t base_r, base_g;
-    if (hal_listening) {
-        // Bright red when listening
-        base_r = 255;
-        base_g = 0;
-    } else if (hal_speaking) {
-        // Orange-red when speaking
-        base_r = 255;
-        base_g = 51;  // #FF3300
-    } else {
-        // Deep red when idle (#CC0000)
-        base_r = 204;
-        base_g = 0;
-    }
+    // Occasional brief flicker so HAL feels alive, not static.
+    float flick = sinf(ms * 0.013f) * sinf(ms * 0.07f);
+    if (flick > 0.92f) brightness *= 0.85f;
 
-    // Apply pulse to colors (vary brightness)
-    float brightness = 0.7f + (pulse * 0.3f);
-
-    // Update outer glow size based on pulse
-    int pulse_offset = (int)(pulse * 20);
-    int glow_size = (EYE_OUTER_RADIUS * 2) + 30 + pulse_offset;
-    lv_obj_set_size(outer_glow, glow_size, glow_size);
-    lv_obj_align(outer_glow, LV_ALIGN_CENTER, 0, 0);
-
-    // Update glow color
-    lv_obj_set_style_bg_color(outer_glow, lv_color_make((uint8_t)(40 * brightness), 0, 0), 0);
-
-    // Hot inner color by state (HAL stays in the red family; movie-accurate).
-    float hotR, hotG;
-    if (hal_listening)      { hotR = 255; hotG = 40; }   // bright, alert
-    else if (hal_speaking)  { hotR = 255; hotG = 95; }   // warm orange
-    else                    { hotR = 235; hotG = 24; }   // deep idle red
-
-    // Colour each lens ring along a smooth radial falloff (rim dark -> core hot).
+    // Traveling radial pulse-wave rippling through the lens rings.
     for (int i = 0; i < EYE_NUM_RINGS; i++) {
-        float t = (float)i / (EYE_NUM_RINGS - 1);        // 0 edge -> 1 inner
-        float f = (0.10f + 0.90f * powf(t, 1.6f)) * brightness;
+        float t = (float)i / (EYE_NUM_RINGS - 1);            // 0 edge -> 1 inner
+        float base = 0.10f + 0.90f * powf(t, 1.6f);          // radial falloff
+        float wave = sinf(t * waveFreq - ms * waveSpeed);    // band ripples inward
+        float f = base * brightness * (1.0f + 0.22f * wave);
+        if (f < 0.0f) f = 0.0f;
         uint8_t r = (uint8_t)fminf(255.0f, hotR * f);
         uint8_t g = (uint8_t)fminf(255.0f, hotG * f);
         lv_obj_set_style_bg_color(rings[i], lv_color_make(r, g, 0), 0);
     }
 
-    // Gold halo + white-hot core breathe gently with the pulse.
-    uint8_t halo_g = 190 + (uint8_t)(pulse * 45);
-    lv_obj_set_style_bg_color(center_yellow, lv_color_make(255, halo_g, (uint8_t)(55 + pulse * 35)), 0);
-    lv_obj_set_style_bg_opa(center_highlight, (lv_opa_t)(220 + (int)(pulse * 35)), 0);
+    // Outer glow halo breathes in size and intensity.
+    int glow = (EYE_OUTER_RADIUS * 2) + 24 + (int)(breathe * 26);
+    lv_obj_set_size(outer_glow, glow, glow);
+    lv_obj_align(outer_glow, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_style_bg_color(outer_glow, lv_color_make((uint8_t)(48 * brightness), 0, 0), 0);
+
+    // Gold halo shimmers; white-hot core dilates with its own faster rhythm.
+    float shimmer = 0.5f + 0.5f * sinf(ms * 0.006f);
+    uint8_t halo_g = 180 + (uint8_t)(shimmer * 55);
+    lv_obj_set_style_bg_color(center_yellow, lv_color_make(255, halo_g, (uint8_t)(45 + shimmer * 45)), 0);
+    int coreR = EYE_HIGHLIGHT_RADIUS + (int)(shimmer * 3);
+    lv_obj_set_size(center_highlight, coreR * 2, coreR * 2);
+    lv_obj_align(center_highlight, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_style_bg_opa(center_highlight, (lv_opa_t)(210 + (int)(shimmer * 45)), 0);
+
+    // Specular glint slowly orbits, like light tracking across a glass lens.
+    float ga = ms * glintSpeed;
+    int gx = (int)(cosf(ga) * 11.0f) - 2;
+    int gy = (int)(sinf(ga) * 11.0f) - 3;
+    lv_obj_align(center_glint, LV_ALIGN_CENTER, gx, gy);
 }
 
 void check_display_state(void)
