@@ -75,7 +75,13 @@ def stt_provides_turn_detection(provider: STTProvider) -> bool:
 
 
 def build_vad(config: HALConfig) -> SileroVADAnalyzer:
-    return SileroVADAnalyzer(params=VADParams(stop_secs=config.turn.vad_stop_secs))
+    return SileroVADAnalyzer(
+        params=VADParams(
+            confidence=config.turn.vad_confidence,
+            stop_secs=config.turn.vad_stop_secs,
+            min_volume=config.turn.vad_min_volume,
+        )
+    )
 
 
 def build_user_turn_strategies(config: HALConfig, *, provider: STTProvider | None = None) -> UserTurnStrategies | None:

@@ -41,7 +41,8 @@ from hal.prompts import (
     unknown_person_instruction,
 )
 from hal.services.llm import build_claude, build_offline_llm
-from hal.services.stt import build_stt, build_user_turn_strategies, build_vad
+from hal.services.audio_gain import InputGainProcessor
+from hal.services.stt import build_stt, build_user_turn_strategies, build_vad, stt_provides_turn_detection
 from hal.services.tts import build_tts
 from hal.state import HALState
 from hal.tools.registry import HALToolbox
@@ -214,16 +215,27 @@ class HALSession:
         aggregators = LLMContextAggregatorPair(
             context,
             user_params=LLMUserAggregatorParams(
-                vad_analyzer=build_vad(cfg),
+                vad_analyzer=None if stt_provides_turn_detection(self.profile.stt) else build_vad(cfg),
                 user_turn_strategies=build_user_turn_strategies(cfg, provider=self.profile.stt),
                 user_idle_timeout=cfg.turn.idle_timeout_secs,
             ),
         )
         self._wire_events(aggregators)
 
+        input_stage = [self.transport.input()]
+        a = cfg.audio
+        if a.input_gain != 1.0 or a.input_gate_rms > 0.0 or a.input_target_rms > 0.0:
+            input_stage.append(
+                InputGainProcessor(
+                    gain=a.input_gain,
+                    gate_rms=a.input_gate_rms,
+                    target_rms=a.input_target_rms,
+                    max_gain=a.input_max_gain,
+                )
+            )
         pipeline = Pipeline(
             [
-                self.transport.input(),
+                *input_stage,
                 stt,
                 aggregators.user(),
                 llm,
@@ -234,7 +246,12 @@ class HALSession:
         )
         self.task = PipelineTask(
             pipeline,
-            params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
+            params=PipelineParams(
+                enable_metrics=True,
+                enable_usage_metrics=True,
+                audio_in_sample_rate=cfg.audio.sample_rate,
+                audio_out_sample_rate=cfg.audio.output_sample_rate,
+            ),
             idle_timeout_secs=cfg.turn.idle_timeout_secs * (MAX_IDLE_NUDGES + 2),
             cancel_on_idle_timeout=True,
         )

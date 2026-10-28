@@ -99,8 +99,11 @@ class Camera:
         while self._running:
             frame = self._device.capture_array("main")
             if frame is not None:
+                bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                if self.config.rotate_180:
+                    bgr = cv2.rotate(bgr, cv2.ROTATE_180)
                 with self._lock:
-                    self._frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                    self._frame = bgr
             time.sleep(interval)
 
     def _loop_opencv(self) -> None:
@@ -115,6 +118,8 @@ class Camera:
         while self._running:
             ok, frame = self._device.read()
             if ok:
+                if self.config.rotate_180:
+                    frame = cv2.rotate(frame, cv2.ROTATE_180)
                 with self._lock:
                     self._frame = frame
             time.sleep(interval)

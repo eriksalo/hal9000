@@ -92,6 +92,10 @@ class AudioConfig:
     output_device_index: int | None = None
     sample_rate: int = 16000
     output_sample_rate: int = 24000
+    input_gain: float = 1.0
+    input_gate_rms: float = 0.0
+    input_target_rms: float = 0.0
+    input_max_gain: float = 30.0
 
 
 @dataclass(frozen=True)
@@ -102,6 +106,8 @@ class TurnConfig:
     smart_turn_cpu_count: int = 2
     smart_turn_stop_secs: float = 2.0
     vad_stop_secs: float = 0.2
+    vad_confidence: float = 0.6
+    vad_min_volume: float = 0.0
     idle_timeout_secs: float = 90.0
 
 
@@ -122,6 +128,7 @@ class VisionConfig:
     width: int = 1280
     height: int = 720
     fps: int = 15
+    rotate_180: bool = False
     face_database: Path = PROJECT_ROOT / "face_database.json"
     face_tolerance: float = 0.6
     presence_threshold_secs: float = 3.0
@@ -222,12 +229,18 @@ def load_config(dotenv_path: Path | None = None) -> HALConfig:
             output_device_index=_optional_int("AUDIO_OUTPUT_DEVICE_INDEX"),
             sample_rate=_env_int("AUDIO_IN_SAMPLE_RATE", 16000),
             output_sample_rate=_env_int("AUDIO_OUT_SAMPLE_RATE", 24000),
+            input_gain=_env_float("AUDIO_INPUT_GAIN", 1.0),
+            input_gate_rms=_env_float("AUDIO_INPUT_GATE_RMS", 0.0),
+            input_target_rms=_env_float("AUDIO_INPUT_TARGET_RMS", 0.0),
+            input_max_gain=_env_float("AUDIO_INPUT_MAX_GAIN", 30.0),
         ),
         turn=TurnConfig(
             smart_turn_enabled=_env_bool("SMART_TURN_ENABLED", True),
             smart_turn_cpu_count=_env_int("SMART_TURN_CPU_COUNT", 2),
             smart_turn_stop_secs=_env_float("SMART_TURN_STOP_SECS", 2.0),
             vad_stop_secs=_env_float("VAD_STOP_SECS", 0.2),
+            vad_confidence=_env_float("VAD_CONFIDENCE", 0.6),
+            vad_min_volume=_env_float("VAD_MIN_VOLUME", 0.0),
             idle_timeout_secs=_env_float("IDLE_TIMEOUT_SECS", 90.0),
         ),
         memory=MemoryConfig(
@@ -244,6 +257,7 @@ def load_config(dotenv_path: Path | None = None) -> HALConfig:
             width=_env_int("CAMERA_WIDTH", 1280),
             height=_env_int("CAMERA_HEIGHT", 720),
             fps=_env_int("CAMERA_FPS", 15),
+            rotate_180=_env_bool("CAMERA_ROTATE_180", False),
             face_database=_env_path("FACE_DATABASE", PROJECT_ROOT / "face_database.json"),
             face_tolerance=_env_float("FACE_TOLERANCE", 0.6),
             presence_threshold_secs=_env_float("PRESENCE_THRESHOLD_SECS", 3.0),

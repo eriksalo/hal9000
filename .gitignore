@@ -55,3 +55,9 @@ amplify/
 .amplifyrc
 esp32_display/src/secrets.h
 esp32_display/.pio/
+
+# HAL runtime conversation memory (per-person, not source)
+memory/
+*.bak
+*.bak[0-9]
+.env.bak.*
