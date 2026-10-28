@@ -30,6 +30,7 @@ class Camera:
         self._running = False
         self._thread: threading.Thread | None = None
         self._device: Any = None
+        self._camera_down = False
         self.camera_type = config.camera_type if (config.camera_type != "picamera2" or PICAMERA2_AVAILABLE) else "opencv"
         if config.camera_type == "picamera2" and not PICAMERA2_AVAILABLE:
             logger.warning("picamera2 not available; falling back to OpenCV camera")
@@ -78,15 +79,24 @@ class Camera:
     # ---- capture loops ----------------------------------------------------------
 
     def _capture_loop(self) -> None:
-        try:
-            if self.camera_type == "picamera2":
-                self._loop_picamera2()
-            else:
-                self._loop_opencv()
-        except Exception as exc:
-            logger.exception(f"Camera loop crashed: {exc}")
-        finally:
-            self._release()
+        # Retry forever so a dropped camera (marginal CSI cable) recovers on its
+        # own instead of killing the thread until a full restart. Log the first
+        # failure and the recovery, not every retry.
+        while self._running:
+            try:
+                if self.camera_type == "picamera2":
+                    self._loop_picamera2()
+                else:
+                    self._loop_opencv()
+            except Exception as exc:
+                if not self._camera_down:
+                    logger.warning(f"Camera unavailable ({exc}); retrying until it returns")
+                    self._camera_down = True
+            finally:
+                self._release()
+            if self._running:
+                time.sleep(3.0)
+        logger.info("Camera loop stopped")
 
     def _loop_picamera2(self) -> None:
         self._device = Picamera2()
@@ -95,6 +105,9 @@ class Camera:
         )
         self._device.configure(config)
         self._device.start()
+        if self._camera_down:
+            logger.info("Camera reconnected")
+            self._camera_down = False
         interval = 1.0 / max(self.config.fps, 1)
         while self._running:
             frame = self._device.capture_array("main")
@@ -109,8 +122,10 @@ class Camera:
     def _loop_opencv(self) -> None:
         self._device = cv2.VideoCapture(self.config.camera_index)
         if not self._device.isOpened():
-            logger.error(f"Cannot open camera index {self.config.camera_index}")
-            return
+            raise RuntimeError(f"cannot open camera index {self.config.camera_index}")
+        if self._camera_down:
+            logger.info("Camera reconnected")
+            self._camera_down = False
         self._device.set(cv2.CAP_PROP_FRAME_WIDTH, self.config.width)
         self._device.set(cv2.CAP_PROP_FRAME_HEIGHT, self.config.height)
         self._device.set(cv2.CAP_PROP_FPS, self.config.fps)

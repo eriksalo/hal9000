@@ -79,3 +79,17 @@ Pi Camera (ov5647) over CSI. If `rpicam-hello --list-cameras` reports "No
 cameras available!", it is almost always a marginal CSI ribbon connection —
 reseat both ends and reboot (CSI is not hot-pluggable). The feed is mounted
 upside down on this unit, corrected in software with `CAMERA_ROTATE_180=true`.
+
+## Keep PipeWire off the camera
+
+Installing pipewire-alsa pulls in the libcamera SPA plugin, which makes PipeWire
+enumerate (and potentially grab) the Pi camera, contending with HALs Picamera2.
+Remove it and pin it so apt upgrades do not bring it back:
+
+    sudo apt-get remove -y pipewire-libcamera libspa-0.2-libcamera
+    printf "Package: pipewire-libcamera\nPin: release *\nPin-Priority: -1\n" | sudo tee /etc/apt/preferences.d/no-pipewire-libcamera
+    printf "Package: libspa-0.2-libcamera\nPin: release *\nPin-Priority: -1\n" | sudo tee -a /etc/apt/preferences.d/no-pipewire-libcamera
+    systemctl --user restart pipewire pipewire-pulse wireplumber
+
+HAL uses libcamera directly via Picamera2, so this does not affect the camera
+feed. The camera thread also retries on its own if the CSI link drops.
