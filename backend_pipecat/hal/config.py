@@ -112,6 +112,19 @@ class TurnConfig:
 
 
 @dataclass(frozen=True)
+class WakeConfig:
+    """Local wake-word detection (openWakeWord) so idle costs nothing."""
+
+    enabled: bool = True
+    model_path: str = "hey_jarvis"  # stock model name, or a path to a custom .onnx
+    threshold: float = 0.5
+    trigger_frames: int = 1
+    refractory_secs: float = 3.0
+    inference_framework: str = "onnx"
+    vad_threshold: float = 0.0
+
+
+@dataclass(frozen=True)
 class MemoryConfig:
     base_dir: Path = PROJECT_ROOT / "memory"
     semantic_enabled: bool = True
@@ -135,6 +148,7 @@ class VisionConfig:
     departure_threshold_secs: float = 5.0
     greeting_cooldown_secs: float = 300.0
     detection_interval_secs: float = 0.2
+    name_hold_secs: float = 60.0
 
 
 @dataclass(frozen=True)
@@ -163,6 +177,7 @@ class HALConfig:
     vision: VisionConfig = field(default_factory=VisionConfig)
     hailo: HailoConfig = field(default_factory=HailoConfig)
     server: ServerConfig = field(default_factory=ServerConfig)
+    wake: WakeConfig = field(default_factory=WakeConfig)
     default_person: str = "Dave"
     timezone: str = "America/Denver"
     log_level: str = "INFO"
@@ -264,6 +279,7 @@ def load_config(dotenv_path: Path | None = None) -> HALConfig:
             departure_threshold_secs=_env_float("DEPARTURE_THRESHOLD_SECS", 5.0),
             greeting_cooldown_secs=_env_float("GREETING_COOLDOWN_SECS", 300.0),
             detection_interval_secs=_env_float("DETECTION_INTERVAL_SECS", 0.2),
+            name_hold_secs=_env_float("NAME_HOLD_SECS", 60.0),
         ),
         hailo=HailoConfig(
             enabled=_env_bool("HAILO_ENABLED", False),
@@ -275,6 +291,15 @@ def load_config(dotenv_path: Path | None = None) -> HALConfig:
             status_port=_env_int("STATUS_PORT", 5000),
             webrtc_port=_env_int("WEBRTC_PORT", 7860),
             host=_env("SERVER_HOST", "0.0.0.0"),
+        ),
+        wake=WakeConfig(
+            enabled=_env_bool("WAKE_ENABLED", True),
+            model_path=_env("WAKE_MODEL", "hey_jarvis"),
+            threshold=_env_float("WAKE_THRESHOLD", 0.5),
+            trigger_frames=_env_int("WAKE_TRIGGER_FRAMES", 1),
+            refractory_secs=_env_float("WAKE_REFRACTORY_SECS", 3.0),
+            inference_framework=_env("WAKE_FRAMEWORK", "onnx"),
+            vad_threshold=_env_float("WAKE_VAD_THRESHOLD", 0.0),
         ),
         default_person=_env("PERSON_NAME", "Dave"),
         timezone=_env("TIMEZONE", "America/Denver"),

@@ -20,12 +20,13 @@ from hal.config import HALConfig
 from hal.connectivity import is_online
 from hal.memory.semantic import SemanticMemory, build_mem0_config
 from hal.memory.store import MemoryStore
-from hal.pipeline import HALSession, ServiceProfile, SessionDeps
+from hal.pipeline import HALSession, ServiceProfile, SessionDeps, SessionOpening
 from hal.state import HALState
 from hal.vision.camera import Camera
 from hal.vision.faces import UNKNOWN, FaceRecognizer
 from hal.vision.presence import PresenceMonitor
 from hal.vision.tracker import PresenceEvent
+from hal.wake import WakeWordListener, choose_wake_person
 
 TransportFactory = Callable[[], BaseTransport]
 
@@ -61,12 +62,19 @@ class AppContext:
             self.recognizer = FaceRecognizer(config.vision.face_database, tolerance=config.vision.face_tolerance)
             self.presence = PresenceMonitor(config.vision, camera=self.camera, recognizer=self.recognizer)
             self.presence.on_presence(self._on_presence)
+        self.wake: WakeWordListener | None = None
+        if config.wake.enabled:
+            self.wake = WakeWordListener(
+                config.wake, config.audio, on_wake=self._on_wake_word, on_armed_change=self._on_wake_armed
+            )
         self.session: HALSession | None = None
         self._session_task: asyncio.Task | None = None
         self._session_lock = asyncio.Lock()
         self._departure_timer: asyncio.Task | None = None
         self._esp32_last_seen: tuple[str, float] | None = None
         self.current_profile: ServiceProfile | None = None
+        self._display_name_until = 0.0
+        self._display_task: asyncio.Task | None = None
 
     # ---- lifecycle -------------------------------------------------------------
 
@@ -74,6 +82,13 @@ class AppContext:
         self.http = aiohttp.ClientSession()
         if self.presence:
             await self.presence.start()
+            self._display_task = asyncio.create_task(self._display_name_loop(), name="hal-display-name")
+        if self.wake:
+            try:
+                await self.wake.start(asyncio.get_running_loop())
+            except Exception as exc:
+                logger.error(f"Wake word unavailable ({exc}); HAL will greet on arrival instead")
+                self.wake = None
         logger.info("HAL application context started")
 
     async def stop(self) -> None:
@@ -83,6 +98,15 @@ class AppContext:
                 await asyncio.wait_for(self._session_task, timeout=20)
             except (asyncio.TimeoutError, asyncio.CancelledError):
                 pass
+        if self.wake:
+            await self.wake.stop()
+        if self._display_task:
+            self._display_task.cancel()
+            try:
+                await self._display_task
+            except asyncio.CancelledError:
+                pass
+            self._display_task = None
         if self.presence:
             await self.presence.stop()
         elif self.camera:
@@ -106,8 +130,18 @@ class AppContext:
             identify_person=self._identify_person if self.recognizer else None,
         )
 
-    async def start_conversation(self, person_name: str, *, transport: BaseTransport | None = None) -> bool:
-        """Start a session for ``person_name``; returns False if one is already running."""
+    async def start_conversation(
+        self,
+        person_name: str,
+        *,
+        transport: BaseTransport | None = None,
+        opening: SessionOpening = "presence",
+    ) -> bool:
+        """Start a session for ``person_name``; returns False if one is already running.
+
+        ``opening`` selects HAL's first line: a greeting for someone who appeared on
+        camera, or an acknowledgement for someone who said the wake phrase.
+        """
         async with self._session_lock:
             if self.session is not None and not self.session._done.is_set():
                 logger.info(f"Busy with {self.session.person_name}; not starting {person_name}")
@@ -119,9 +153,13 @@ class AppContext:
             self.current_profile = ServiceProfile.select(self.config, online=online)
             if not online and not self.config.hailo.enabled:
                 logger.warning("Offline and Hailo fallback disabled; conversation will likely fail")
-            self.session = HALSession(self._deps(), transport, person_name=person_name, profile=self.current_profile)
+            self.session = HALSession(
+                self._deps(), transport, person_name=person_name, profile=self.current_profile, opening=opening
+            )
             if self.presence:
                 self.presence.tracker.mark_in_conversation(person_name, True)
+            if self.wake:
+                self.wake.pause()
             self._session_task = asyncio.create_task(self._run_session(self.session), name=f"hal-session-{person_name}")
             return True
 
@@ -129,6 +167,8 @@ class AppContext:
         try:
             await session.run()
         finally:
+            if self.wake:
+                self.wake.resume()
             if self.presence:
                 self.presence.tracker.mark_in_conversation(session.person_name, False)
             if self.session is session:
@@ -156,9 +196,12 @@ class AppContext:
 
         session = self.session
         if session is None:
-            for name in event.arrived:
-                if await self.start_conversation(name):
-                    break
+            # With a wake word, conversations start on the wake phrase, not on
+            # mere presence. Without one, greet whoever arrives.
+            if self.wake is None:
+                for name in event.arrived:
+                    if await self.start_conversation(name):
+                        break
             return
 
         if event.arrived or event.departed:
@@ -186,6 +229,49 @@ class AppContext:
         if self._departure_timer:
             self._departure_timer.cancel()
             self._departure_timer = None
+
+    # ---- wake word -------------------------------------------------------------------
+
+    async def _on_wake_word(self) -> None:
+        self.state.last_wake_at = time.time()
+        if self.session is not None and not self.session._done.is_set():
+            return
+        name = self._wake_person_name()
+        logger.info(f"Wake word -> starting conversation with {name}")
+        await self.start_conversation(name, opening="wake")
+
+    def _wake_person_name(self) -> str:
+        tracker = self.presence.tracker if self.presence else None
+        return choose_wake_person(
+            known_present=tracker.present_known() if tracker else [],
+            present=tracker.present() if tracker else [],
+            default_person=self.config.default_person,
+        )
+
+    def _on_wake_armed(self, armed: bool) -> None:
+        self.state.wake_armed = armed
+
+    # ---- display name hold -----------------------------------------------------------
+
+    async def _display_name_loop(self) -> None:
+        """Show a recognised person's name, holding it after they leave."""
+        hold = self.config.vision.name_hold_secs
+        while True:
+            try:
+                tracker = self.presence.tracker if self.presence else None
+                known = tracker.present_known() if tracker else []
+                now = time.time()
+                if known:
+                    self.state.display_name = known[0]
+                    self._display_name_until = now + hold
+                elif self.state.display_name and now >= self._display_name_until:
+                    self.state.display_name = None
+                await asyncio.sleep(1.0)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.exception(f"Display-name loop error: {exc}")
+                await asyncio.sleep(1.0)
 
     # ---- faces ------------------------------------------------------------------------
 

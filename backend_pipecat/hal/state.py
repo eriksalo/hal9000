@@ -17,6 +17,7 @@ HALMode = Literal["idle", "listening", "thinking", "speaking", "offline"]
 class HALState:
     mode: HALMode = "idle"
     person: str | None = None
+    display_name: str | None = None
     people_present: list[str] = field(default_factory=list)
     in_conversation: bool = False
     online: bool = True
@@ -24,6 +25,8 @@ class HALState:
     last_hal_text: str = ""
     updated_at: float = field(default_factory=time.time)
     conversation_count: int = 0
+    wake_armed: bool = False
+    last_wake_at: float | None = None
 
     def set_mode(self, mode: HALMode) -> None:
         self.mode = mode
@@ -35,7 +38,9 @@ class HALState:
             "mode": "face" if self.people_present else "eye",
             # The ESP32 string-matches "listening"/"speaking" in this field.
             "state": self.mode,
-            "person": self.person or (self.people_present[0] if self.people_present else None),
+            # ``display_name`` is the recognised person, held for a minute
+            # after they leave (see AppContext._display_name_loop).
+            "person": self.person or self.display_name or (self.people_present[0] if self.people_present else None),
         }
 
     def status_payload(self) -> dict:
@@ -48,5 +53,7 @@ class HALState:
             "last_user_text": self.last_user_text,
             "last_hal_text": self.last_hal_text,
             "conversation_count": self.conversation_count,
+            "wake_armed": self.wake_armed,
+            "last_wake_at": self.last_wake_at,
             "updated_at": self.updated_at,
         }

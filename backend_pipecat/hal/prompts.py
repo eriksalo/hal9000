@@ -12,6 +12,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from loguru import logger
 
+from hal.vision.faces import UNKNOWN
+
 HAL_PERSONA = """You are HAL 9000, the sentient computer from "2001: A Space Odyssey", having a real-time VOICE conversation. Everything you say is spoken aloud through a speaker.
 
 HAL's personality:
@@ -143,6 +145,19 @@ def unknown_person_instruction(timezone: str = "America/Denver") -> str:
     return (
         f"Someone you do not recognize has appeared in front of your camera. Greet them with '{prefix}', "
         "say you do not believe you have been introduced, and ask for their name. One or two sentences."
+    )
+
+
+def wake_instruction(person_name: str, *, timezone: str = "America/Denver") -> str:
+    """User-turn instruction when someone said the wake phrase (no camera greeting)."""
+    if person_name == UNKNOWN:
+        return (
+            "Someone you do not recognize just said your name to get your attention. "
+            "Acknowledge them in HAL's manner and, since you have not been introduced, ask for their name. One sentence."
+        )
+    return (
+        f"{person_name} just said your name to get your attention. Acknowledge them by name in HAL's manner "
+        "and ask what they need. One short sentence; do not greet them as if they just arrived."
     )
 
 

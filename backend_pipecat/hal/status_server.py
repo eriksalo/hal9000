@@ -90,7 +90,7 @@ DASHBOARD_HTML = r"""<!doctype html>
     <div>
       <div class="mode" id="mode">&mdash;</div>
       <div class="sub" id="sub">connecting&hellip;</div>
-      <div style="margin-top:8px"><span class="pill" id="net">&mdash;</span> <span class="pill" id="esp">eye &mdash;</span></div>
+      <div style="margin-top:8px"><span class="pill" id="net">&mdash;</span> <span class="pill" id="esp">eye &mdash;</span> <span class="pill" id="wake">wake &mdash;</span></div>
     </div>
   </div>
 
@@ -151,6 +151,7 @@ async function poll(){
     $('hal').textContent = d.last_hal_text || '—';
     $('net').textContent = d.online ? 'online' : 'offline'; $('net').className = 'pill '+(d.online?'online':'offline');
     const e = d.esp32||{}; $('esp').textContent = 'eye '+(e.connected?'connected':'offline'); $('esp').className='pill '+(e.connected?'online':'offline');
+    $('wake').textContent = d.wake_armed ? 'wake armed' : (d.in_conversation ? 'wake paused' : 'wake off'); $('wake').className='pill '+(d.wake_armed?'online':'offline');
   } catch(err){ $('sub').textContent = 'backend unreachable'; }
 }
 function refreshCam(){ $('cam').src = '/api/vision/frame?t=' + Date.now(); }

@@ -12,6 +12,15 @@ pipecat-ai[whisper]>=1.14.0,<2.0        # faster-whisper
 # pipecat-ai[moonshine]>=1.14.0,<2.0    # optional: Moonshine ONNX STT on Pi CPU
 piper-tts>=1.3.0                        # local HAL voice: python -m piper.http_server
 
+# Wake word (openWakeWord, ONNX backend). openwakeword 0.6 pins tflite-runtime, which has
+# no wheel for Python 3.13/arm64, so install it without deps and bring the ONNX deps yourself:
+#   pip install --no-deps 'openwakeword>=0.6'
+onnxruntime>=1.17
+scikit-learn>=1.4                       # imported by openwakeword at package import time
+scipy>=1.12
+requests>=2.31
+tqdm>=4.66
+
 # Semantic memory (mem0 OSS, local Qdrant + sentence-transformers)
 mem0ai>=2.2
 qdrant-client>=1.12

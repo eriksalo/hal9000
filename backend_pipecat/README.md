@@ -45,11 +45,14 @@ backend_pipecat/
 
 ## How a conversation works
 
-1. `PresenceMonitor` sees a known face for 3 s → `AppContext.start_conversation(name)`.
+1. Someone says the wake phrase → `AppContext.start_conversation(name, opening="wake")`,
+   where `name` is the recognised face in view (or the unknown-person flow, or `PERSON_NAME`).
+   With `WAKE_ENABLED=false`, `PresenceMonitor` seeing a known face for 3 s starts it instead.
 2. `HALSession` loads the person's profile summary, HAL's `notes.md`, and the top mem0
    memories, builds the system prompt (persona first so the prompt cache hits), and
    registers the tools.
-3. An opening instruction is queued and HAL greets them by name, in context.
+3. An opening instruction is queued and HAL acknowledges them by name (or greets them, when
+   started by presence), in context.
 4. Deepgram Flux decides when the user has finished speaking; Claude replies; Cartesia
    streams HAL's voice. Interruptions are handled by the aggregators.
 5. HAL calls `remember` as it learns things and `end_conversation` when they say goodbye.
@@ -118,8 +121,35 @@ journalctl -fu hal
 | HAL cuts you off mid-sentence | Flux: raise `eot_threshold` in `services/stt.py` (0.7 → 0.8); local: raise `SMART_TURN_STOP_SECS` |
 | HAL waits too long after you stop | lower `eot_threshold` / `SMART_TURN_STOP_SECS`; `VAD_STOP_SECS` |
 | Name misheard | add to `STT_KEYTERMS` |
+| Wake word misses you / false-triggers | lower / raise `WAKE_THRESHOLD`; `WAKE_TRIGGER_FRAMES=2` to require two frames; `WAKE_VAD_THRESHOLD=0.3` |
+| HAL answers conversations not meant for it | keep `WAKE_ENABLED=true` (presence alone no longer starts a session) |
 | HAL forgets things | check `memory/people/<name>/notes.md` and `summary.json`; `MEMORY_SEMANTIC_ENABLED` |
 | Pi CPU pegged | `SMART_TURN_CPU_COUNT=1`, lower `CAMERA_FPS`, raise `DETECTION_INTERVAL_SECS` |
+
+## Wake word
+
+`hal/wake.py` runs [openWakeWord](https://github.com/dscripka/openWakeWord) on the
+echo-cancelled mic whenever no conversation is active (~5 ms per 80 ms frame on the Pi 5,
+ONNX runtime). On a hit it starts a session for whoever the camera sees; the listener is
+paused for the whole conversation so it never hears HAL's own voice. Nothing streams to the
+cloud while HAL is idle, and HAL stops answering conversations that were not addressed to it.
+
+```bash
+pip install --no-deps 'openwakeword>=0.6'   # tflite-runtime has no py3.13/arm64 wheel; ONNX is used
+python scripts/wake_test.py                 # listen 45 s, print scores and detections
+python scripts/wake_test.py --wav clip.wav  # score a 16 kHz mono WAV offline
+```
+
+Knobs: `WAKE_MODEL`, `WAKE_THRESHOLD`, `WAKE_TRIGGER_FRAMES`, `WAKE_REFRACTORY_SECS` (see
+`.env.example`). The dashboard pill shows `wake armed` / `wake paused`.
+
+**Custom "Hey HAL" phrase.** The stock models are `hey_jarvis`, `hey_mycroft`, `alexa`,
+`hey_rhasspy`. To get HAL's own name, train a model with the openWakeWord
+[automatic training notebook](https://github.com/dscripka/openWakeWord/blob/main/notebooks/automatic_model_training.ipynb)
+(Colab, ~1 h on a free GPU; it synthesises the phrase with TTS, no recordings needed), download
+the resulting `hey_hal.onnx`, put it under `backend_pipecat/models/`, and set
+`WAKE_MODEL=models/hey_hal.onnx`. Two-syllable phrases like "Hey HAL" false-trigger more than
+longer ones; "Hello HAL" or "HAL, listen" train noticeably cleaner.
 
 ## Hailo-10H
 

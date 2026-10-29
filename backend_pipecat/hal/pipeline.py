@@ -13,6 +13,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Literal
 
 import aiohttp
 import anthropic
@@ -39,6 +40,7 @@ from hal.prompts import (
     greeting_instruction,
     presence_update,
     unknown_person_instruction,
+    wake_instruction,
 )
 from hal.services.llm import build_claude, build_offline_llm
 from hal.services.audio_gain import InputGainProcessor
@@ -52,6 +54,8 @@ from hal.vision.camera import Camera
 from hal.vision.faces import UNKNOWN
 
 MAX_IDLE_NUDGES = 2
+
+SessionOpening = Literal["presence", "wake"]
 
 
 @dataclass(frozen=True)
@@ -93,12 +97,14 @@ class HALSession:
         *,
         person_name: str,
         profile: ServiceProfile,
+        opening: SessionOpening = "presence",
     ):
         self.deps = deps
         self.config = deps.config
         self.transport = transport
         self.person_name = person_name
         self.profile = profile
+        self.opening = opening
         self.record: ConversationRecord | None = None
         self.task: PipelineTask | None = None
         self._runner: PipelineRunner | None = None
@@ -264,7 +270,9 @@ class HALSession:
         return self.task
 
     def _opening_frame(self) -> LLMMessagesAppendFrame:
-        if self.is_unknown:
+        if self.opening == "wake":
+            instruction = wake_instruction(self.person_name, timezone=self.config.timezone)
+        elif self.is_unknown:
             instruction = unknown_person_instruction(self.config.timezone)
         else:
             first = self.deps.store.load_profile(self.person_name).get("conversation_count", 0) <= 1
