@@ -38,7 +38,10 @@
  */
 // #define LVGL_PORT_BUFFER_MALLOC_CAPS            (MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)       // Allocate LVGL buffer in SRAM
 #define LVGL_PORT_BUFFER_MALLOC_CAPS            (MALLOC_CAP_SPIRAM)      // Allocate LVGL buffer in PSRAM
-#define LVGL_PORT_BUFFER_SIZE_HEIGHT            (20)
+// Full-screen draw buffers: the procedural eye repaints the whole screen every
+// frame, so a full-height buffer lets LVGL flush it in a single pass instead of
+// ~24 strips, which removes the horizontal tearing seams.
+#define LVGL_PORT_BUFFER_SIZE_HEIGHT            (480)
 #define LVGL_PORT_BUFFER_NUM                    (2)
 
 /**

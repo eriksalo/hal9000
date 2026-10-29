@@ -28,18 +28,26 @@ using namespace esp_panel::board;
 #define CENTER_X          240
 #define CENTER_Y          240
 
-// HAL eye parameters - movie accurate
-#define EYE_OUTER_RADIUS    140
-#define EYE_RING_1_RADIUS   130
-#define EYE_RING_2_RADIUS   118
-#define EYE_RING_3_RADIUS   105
-#define EYE_RING_4_RADIUS   90
-#define EYE_INNER_RADIUS    75
-#define EYE_CENTER_RADIUS   30
-#define EYE_HIGHLIGHT_RADIUS 13
-#define EYE_NUM_RINGS       22
-#define EYE_R_EDGE          150
-#define EYE_R_CORE          30
+// HAL eye renderer - procedural radial framebuffer (smooth, high-res, dithered).
+// The eye is drawn per-pixel into a full-screen canvas so it fills the round display.
+#define EYE_CANVAS_SIZE   480          // framebuffer is EYE_CANVAS_SIZE^2 (full screen)
+#define EYE_CANVAS_CENTER 240          // center of that canvas
+#define EYE_PROFILE_MAX   245          // radial color profile covers r in [0, EYE_PROFILE_MAX)
+#define EYE_DIST_OUTSIDE  255          // LUT sentinel: pixel lies outside the eye -> black
+
+// Nominal eye geometry (radius in pixels from the canvas center). Sized so the glow
+// reaches the edge of the 480px round display.
+#define EYE_R_CORE   18.0f             // white-hot core (dilates with the animation)
+#define EYE_R_HALO   46.0f             // gold halo
+#define EYE_R_LENS   196.0f            // outer edge of the solid lens
+#define EYE_R_GLOW   236.0f            // soft glow fades to black by here (near the rim)
+
+// On-screen content rotation to compensate for a physically rotated mount.
+// Positive = clockwise (as the viewer sees it). The eye is radially symmetric so
+// only the status text is visibly affected; flip the sign if the mount tilts the
+// other way. 0 = no rotation.
+#define UI_ROTATION_DEG   30.0f
+#define UI_LABEL_RADIUS   214.0f       // distance of the status text from center (near the rim)
 
 // Display modes
 enum DisplayMode {
@@ -47,13 +55,36 @@ enum DisplayMode {
     MODE_FACE
 };
 
-// LVGL objects for HAL eye layers (outer to inner)
-static lv_obj_t *outer_glow = NULL;
-static lv_obj_t *rings[EYE_NUM_RINGS] = {NULL};
-static lv_obj_t *center_yellow = NULL;
-static lv_obj_t *center_highlight = NULL;
-static lv_obj_t *center_glint = NULL;
-static lv_obj_t *status_label = NULL;
+// Which animation the eye is currently playing.
+enum EyeState {
+    EYE_IDLE,
+    EYE_LISTENING,
+    EYE_THINKING,
+    EYE_SPEAKING
+};
+
+// Procedural eye framebuffer + distance LUT (both in PSRAM)
+static lv_obj_t  *eye_canvas = NULL;
+static lv_color_t *eye_buffer = NULL;   // EYE_CANVAS_SIZE^2 pixels
+static uint8_t    *eye_dist = NULL;     // per-pixel distance from center (EYE_DIST_OUTSIDE = black)
+static lv_obj_t  *status_label = NULL;
+
+// Animation state (set by the network poll, read by the LVGL render timer)
+static EyeState eye_state = EYE_IDLE;
+static EyeState eye_state_prev = EYE_IDLE;
+static unsigned long eye_accent_t0 = 0; // when the state last changed -> drives the accent ring
+
+// Tunables for one eye "animation". The renderer eases the live values toward the
+// target for the active state, so state changes morph smoothly instead of snapping.
+struct EyeParams {
+    float hotR, hotG;        // lens "hot" color
+    float coreR;             // base core radius
+    float breatheSpeed, breatheAmp;
+    float waveAmp, waveFreq, waveSpeed, waveDir;  // ripple: dir +1 inward, -1 outward
+    float glowLevel, jitter, glintSpeed;
+};
+// Live (eased) parameters; initialized to the idle animation.
+static EyeParams eye_cur = {230.f, 18.f, 13.f, 0.0012f, 0.14f, 0.06f, 1.3f, 0.0016f, 1.f, 0.92f, 0.f, 0.0006f};
 
 // Face display objects
 static lv_obj_t *face_canvas = NULL;
@@ -226,71 +257,62 @@ void loop()
 
 void create_hal_eye(void)
 {
-    // Set black background
+    // Black screen background; the eye lives inside a centered canvas.
     lv_obj_set_style_bg_color(lv_scr_act(), lv_color_black(), 0);
 
-    // Create outer glow circle (pulsing, darkest)
-    outer_glow = lv_obj_create(lv_scr_act());
-    lv_obj_remove_style_all(outer_glow);
-    lv_obj_set_size(outer_glow, EYE_OUTER_RADIUS * 2 + 30, EYE_OUTER_RADIUS * 2 + 30);
-    lv_obj_align(outer_glow, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_set_style_bg_color(outer_glow, lv_color_make(40, 0, 0), 0);
-    lv_obj_set_style_bg_opa(outer_glow, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(outer_glow, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_border_width(outer_glow, 0, 0);
-
-    // Lens: many concentric circles forming a smooth radial gradient (outer -> inner).
-    for (int i = 0; i < EYE_NUM_RINGS; i++) {
-        float t = (float)i / (EYE_NUM_RINGS - 1);              // 0 = edge, 1 = inner
-        int radius = (int)(EYE_R_EDGE - (EYE_R_EDGE - EYE_R_CORE) * t);
-        rings[i] = lv_obj_create(lv_scr_act());
-        lv_obj_remove_style_all(rings[i]);
-        lv_obj_set_size(rings[i], radius * 2, radius * 2);
-        lv_obj_align(rings[i], LV_ALIGN_CENTER, 0, 0);
-        lv_obj_set_style_bg_opa(rings[i], LV_OPA_COVER, 0);
-        lv_obj_set_style_radius(rings[i], LV_RADIUS_CIRCLE, 0);
-        lv_obj_set_style_border_width(rings[i], 0, 0);
+    // Allocate the eye framebuffer and a distance-from-center LUT in PSRAM.
+    size_t npx = (size_t)EYE_CANVAS_SIZE * EYE_CANVAS_SIZE;
+    eye_buffer = (lv_color_t *)heap_caps_malloc(npx * sizeof(lv_color_t), MALLOC_CAP_SPIRAM);
+    eye_dist   = (uint8_t *)heap_caps_malloc(npx, MALLOC_CAP_SPIRAM);
+    if (eye_buffer == NULL || eye_dist == NULL) {
+        Serial.println("ERROR: Failed to allocate eye buffers in PSRAM!");
+        return;
     }
 
-    // Gold halo at the center of the lens
-    center_yellow = lv_obj_create(lv_scr_act());
-    lv_obj_remove_style_all(center_yellow);
-    lv_obj_set_size(center_yellow, EYE_CENTER_RADIUS * 2, EYE_CENTER_RADIUS * 2);
-    lv_obj_align(center_yellow, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_set_style_bg_color(center_yellow, lv_color_make(255, 205, 70), 0);
-    lv_obj_set_style_bg_opa(center_yellow, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(center_yellow, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_border_width(center_yellow, 0, 0);
+    // Precompute each pixel's rounded distance from the center. Pixels beyond the
+    // glow radius are tagged so the profile renders them black. This turns the
+    // per-frame fill into one byte-read + one table lookup per pixel.
+    for (int y = 0; y < EYE_CANVAS_SIZE; y++) {
+        int dy = y - EYE_CANVAS_CENTER;
+        int dy2 = dy * dy;
+        uint8_t *row = eye_dist + (size_t)y * EYE_CANVAS_SIZE;
+        for (int x = 0; x < EYE_CANVAS_SIZE; x++) {
+            int dx = x - EYE_CANVAS_CENTER;
+            int d = (int)(sqrtf((float)(dx * dx + dy2)) + 0.5f);
+            row[x] = (d < EYE_PROFILE_MAX) ? (uint8_t)d : EYE_DIST_OUTSIDE;
+        }
+    }
 
-    // White-hot core
-    center_highlight = lv_obj_create(lv_scr_act());
-    lv_obj_remove_style_all(center_highlight);
-    lv_obj_set_size(center_highlight, EYE_HIGHLIGHT_RADIUS * 2, EYE_HIGHLIGHT_RADIUS * 2);
-    lv_obj_align(center_highlight, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_set_style_bg_color(center_highlight, lv_color_make(255, 250, 235), 0);
-    lv_obj_set_style_bg_opa(center_highlight, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(center_highlight, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_border_width(center_highlight, 0, 0);
+    // Canvas centered on the screen.
+    eye_canvas = lv_canvas_create(lv_scr_act());
+    lv_canvas_set_buffer(eye_canvas, eye_buffer, EYE_CANVAS_SIZE, EYE_CANVAS_SIZE, LV_IMG_CF_TRUE_COLOR);
+    lv_obj_align(eye_canvas, LV_ALIGN_CENTER, 0, 0);
+    lv_canvas_fill_bg(eye_canvas, lv_color_black(), LV_OPA_COVER);
 
-    // Small specular glint, offset up-left (gives the lens depth)
-    center_glint = lv_obj_create(lv_scr_act());
-    lv_obj_remove_style_all(center_glint);
-    lv_obj_set_size(center_glint, 11, 11);
-    lv_obj_align(center_glint, LV_ALIGN_CENTER, -9, -10);
-    lv_obj_set_style_bg_color(center_glint, lv_color_white(), 0);
-    lv_obj_set_style_bg_opa(center_glint, LV_OPA_80, 0);
-    lv_obj_set_style_radius(center_glint, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_border_width(center_glint, 0, 0);
-
-    // Create status label
+    // Status label, placed at the rotated "bottom" and tilted to match the mount.
+    // Fixed width + centered text keeps the rotation pivot stable as the text changes.
     status_label = lv_label_create(lv_scr_act());
+    lv_obj_set_width(status_label, 200);
+    lv_obj_set_style_text_align(status_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(status_label, "Initializing...");
-    lv_obj_set_style_text_color(status_label, lv_color_make(200, 0, 0), 0);
+    lv_obj_set_style_text_color(status_label, lv_color_make(255, 60, 40), 0);
     lv_obj_set_style_text_font(status_label, &lv_font_montserrat_16, 0);
-    lv_obj_align(status_label, LV_ALIGN_BOTTOM_MID, 0, -30);
+    // Dark rounded backing so the text reads over the eye's glow.
+    lv_obj_set_style_bg_color(status_label, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(status_label, LV_OPA_50, 0);
+    lv_obj_set_style_pad_ver(status_label, 3, 0);
+    lv_obj_set_style_radius(status_label, 8, 0);
 
-    // Create animation timer
-    lv_timer_create(update_hal_eye, 25, NULL);  // ~30fps
+    float ui_rad = UI_ROTATION_DEG * 0.01745329f;   // degrees -> radians
+    int label_dx = (int)(-UI_LABEL_RADIUS * sinf(ui_rad));
+    int label_dy = (int)( UI_LABEL_RADIUS * cosf(ui_rad));
+    lv_obj_align(status_label, LV_ALIGN_CENTER, label_dx, label_dy);
+    lv_obj_set_style_transform_pivot_x(status_label, 100, 0);  // half of the fixed width
+    lv_obj_set_style_transform_pivot_y(status_label, 10, 0);
+    lv_obj_set_style_transform_angle(status_label, (int)(UI_ROTATION_DEG * 10.0f), 0);  // 0.1deg units, CW
+
+    // Procedural animation timer (~30fps).
+    lv_timer_create(update_hal_eye, 33, NULL);
 }
 
 void create_face_display(void)
@@ -316,60 +338,179 @@ void create_face_display(void)
 
 void update_hal_eye(lv_timer_t *timer)
 {
-    if (current_mode == MODE_FACE) return;
+    if (current_mode == MODE_FACE || eye_buffer == NULL) return;
 
     float ms = (float)millis();
 
-    // State drives the character of the animation.
-    float breatheSpeed, waveSpeed, waveFreq, glintSpeed, hotR, hotG;
-    if (hal_listening) {        // alert: quick shimmer, brighter
-        breatheSpeed = 0.0016f; waveSpeed = 0.0100f; waveFreq = 7.0f; glintSpeed = 0.0022f; hotR = 255; hotG = 44;
-    } else if (hal_speaking) {  // warm orange, pulsing like speech
-        breatheSpeed = 0.0024f; waveSpeed = 0.0140f; waveFreq = 5.0f; glintSpeed = 0.0017f; hotR = 255; hotG = 100;
-    } else {                    // idle: slow, deep, calm
-        breatheSpeed = 0.0011f; waveSpeed = 0.0055f; waveFreq = 6.0f; glintSpeed = 0.0009f; hotR = 232; hotG = 22;
+    // --- Target parameters for the active state's animation -------------------
+    // Fields: hotR, hotG, coreR, breatheSpeed, breatheAmp,
+    //         waveAmp, waveFreq, waveSpeed, waveDir, glowLevel, jitter, glintSpeed
+    EyeParams tgt;
+    switch (eye_state) {
+    case EYE_LISTENING:   // alert, "receiving" - bright red, ripples expand OUTWARD
+        tgt = {255.f,  60.f, 15.f, 0.0022f, 0.12f, 0.16f, 2.2f, 0.0060f, -1.f, 1.05f, 0.00f, 0.0014f};
+        break;
+    case EYE_THINKING:    // contemplative - gold, bands march INWARD, glint sweeps the lens
+        tgt = {255.f, 150.f, 14.f, 0.0016f, 0.10f, 0.13f, 3.0f, 0.0050f,  1.f, 1.00f, 0.00f, 0.0032f};
+        break;
+    case EYE_SPEAKING:    // vocalizing - warm amber, brightness jitters like speech
+        tgt = {255.f, 105.f, 16.f, 0.0030f, 0.10f, 0.18f, 2.0f, 0.0100f,  1.f, 1.05f, 0.38f, 0.0012f};
+        break;
+    default:              // idle - calm, deep red, nearly still
+        tgt = {230.f,  18.f, 13.f, 0.0012f, 0.14f, 0.06f, 1.3f, 0.0016f,  1.f, 0.92f, 0.00f, 0.0006f};
+        break;
     }
 
-    // Slow overall breathing.
-    float breathe = 0.5f + 0.5f * sinf(ms * breatheSpeed);
-    float brightness = 0.72f + 0.28f * breathe;
+    // Ease the live parameters toward the target so states morph, not snap.
+    EyeParams *c = &eye_cur;
+    const float k = 0.08f;
+    c->hotR += (tgt.hotR - c->hotR) * k;
+    c->hotG += (tgt.hotG - c->hotG) * k;
+    c->coreR += (tgt.coreR - c->coreR) * k;
+    c->breatheSpeed += (tgt.breatheSpeed - c->breatheSpeed) * k;
+    c->breatheAmp += (tgt.breatheAmp - c->breatheAmp) * k;
+    c->waveAmp += (tgt.waveAmp - c->waveAmp) * k;
+    c->waveFreq += (tgt.waveFreq - c->waveFreq) * k;
+    c->waveSpeed += (tgt.waveSpeed - c->waveSpeed) * k;
+    c->waveDir += (tgt.waveDir - c->waveDir) * k;
+    c->glowLevel += (tgt.glowLevel - c->glowLevel) * k;
+    c->jitter += (tgt.jitter - c->jitter) * k;
+    c->glintSpeed += (tgt.glintSpeed - c->glintSpeed) * k;
 
-    // Occasional brief flicker so HAL feels alive, not static.
+    // --- Global brightness envelope ------------------------------------------
+    float breathe = 0.5f + 0.5f * sinf(ms * c->breatheSpeed);
+    float bright = (1.0f - c->breatheAmp) + c->breatheAmp * breathe;
+
+    // Speech-like jitter while speaking: an irregular, livelier envelope.
+    if (c->jitter > 0.01f) {
+        float env = 0.5f + 0.5f * sinf(ms * 0.019f);
+        env *= 0.6f + 0.4f * (0.5f + 0.5f * sinf(ms * 0.043f + 1.0f));
+        bright = bright * (1.0f - c->jitter) + (0.72f + 0.6f * env) * c->jitter;
+    }
+
+    // Occasional brief flicker so HAL never feels static.
     float flick = sinf(ms * 0.013f) * sinf(ms * 0.07f);
-    if (flick > 0.92f) brightness *= 0.85f;
+    if (flick > 0.93f) bright *= 0.82f;
 
-    // Traveling radial pulse-wave rippling through the lens rings.
-    for (int i = 0; i < EYE_NUM_RINGS; i++) {
-        float t = (float)i / (EYE_NUM_RINGS - 1);            // 0 edge -> 1 inner
-        float base = 0.10f + 0.90f * powf(t, 1.6f);          // radial falloff
-        float wave = sinf(t * waveFreq - ms * waveSpeed);    // band ripples inward
-        float f = base * brightness * (1.0f + 0.22f * wave);
-        if (f < 0.0f) f = 0.0f;
-        uint8_t r = (uint8_t)fminf(255.0f, hotR * f);
-        uint8_t g = (uint8_t)fminf(255.0f, hotG * f);
-        lv_obj_set_style_bg_color(rings[i], lv_color_make(r, g, 0), 0);
+    // Accent ring: a bright band that expands and fades whenever the state changes.
+    float acc_age = ms - (float)eye_accent_t0;
+    float acc_r = acc_age * 0.42f;                                   // travels outward (px)
+    float acc_amp = (acc_age < 1100.f) ? expf(-acc_age / 320.f) * 0.9f : 0.0f;
+
+    // White-hot core dilates on its own slow rhythm.
+    float coreShim = 0.5f + 0.5f * sinf(ms * 0.006f);
+    float coreR = c->coreR + coreShim * 3.0f;
+
+    // --- Build the radial color profile (one entry per pixel-radius) ----------
+    // Kept at full 8-bit precision; dithered down to RGB565 during the fill so the
+    // smooth gradient doesn't show concentric banding on the panel.
+    static uint8_t profR[256], profG[256], profB[256];
+    float hotR = c->hotR, hotG = c->hotG;
+    for (int r = 0; r < EYE_PROFILE_MAX; r++) {
+        float fr = (float)r;
+        float R = 0.f, G = 0.f, B = 0.f;
+
+        if (fr < coreR) {                         // white-hot core, warms to the halo at its edge
+            // At t=1 this equals the halo's start color (255,210,110)*bright, so the
+            // core blends seamlessly into the halo with no ring.
+            float t = fr / coreR;
+            R = 255.f * bright;
+            G = (250.f - 40.f * t) * bright;
+            B = (235.f - 125.f * t) * bright;
+        } else if (fr < EYE_R_HALO) {             // gold halo: white -> lens hot color
+            float t = (fr - coreR) / (EYE_R_HALO - coreR);
+            R = (255.f * (1.f - t) + hotR * t) * bright;
+            G = (210.f * (1.f - t) + hotG * t) * bright;
+            B = (110.f * (1.f - t)) * bright;
+        } else if (fr < EYE_R_LENS) {             // main lens: radial gradient + ripple
+            float t = (fr - EYE_R_HALO) / (EYE_R_LENS - EYE_R_HALO);   // 0 inner -> 1 outer
+            float radial = 1.0f - 0.72f * t;                           // brighter toward center
+            float phase = c->waveFreq * t * 6.2832f + c->waveDir * ms * c->waveSpeed;
+            float f = radial * bright * (1.0f + c->waveAmp * sinf(phase));
+            if (acc_amp > 0.002f) {               // expanding accent band
+                float d = fr - acc_r;
+                f += acc_amp * expf(-(d * d) / 180.f);
+            }
+            if (f < 0.f) f = 0.f;
+            R = hotR * f;
+            G = hotG * f;
+        } else if (fr < EYE_R_GLOW) {             // soft outer glow, continuous with the lens edge
+            // Start exactly where the lens leaves off (its radial intensity at t=1 is
+            // 1 - 0.72 = 0.28) so there is no brightness step/ring at the boundary.
+            float t = (fr - EYE_R_LENS) / (EYE_R_GLOW - EYE_R_LENS);
+            float fall = (1.0f - t) * (1.0f - t);
+            float f = 0.28f * fall * bright * c->glowLevel;
+            R = hotR * f;
+            G = hotG * f * 0.7f;
+        }
+
+        if (R > 255.f) R = 255.f; if (R < 0.f) R = 0.f;
+        if (G > 255.f) G = 255.f; if (G < 0.f) G = 0.f;
+        if (B > 255.f) B = 255.f; if (B < 0.f) B = 0.f;
+        profR[r] = (uint8_t)R; profG[r] = (uint8_t)G; profB[r] = (uint8_t)B;
+    }
+    for (int r = EYE_PROFILE_MAX; r < 256; r++) { profR[r] = profG[r] = profB[r] = 0; }
+
+    // --- Fill the framebuffer, dithering 8-bit color down to RGB565 ----------
+    // An 8x8 ordered (Bayer) dither spreads the quantization error across neighbouring
+    // pixels with 64 fine gradations, turning hard colour steps into a smooth gradient.
+    // Dither amplitude is tuned slightly above each channel's quantization step
+    // (red/blue: 8, green: 4) so no residual contour rings survive.
+    static const uint8_t bayer8[64] = {
+         0, 32,  8, 40,  2, 34, 10, 42,
+        48, 16, 56, 24, 50, 18, 58, 26,
+        12, 44,  4, 36, 14, 46,  6, 38,
+        60, 28, 52, 20, 62, 30, 54, 22,
+         3, 35, 11, 43,  1, 33,  9, 41,
+        51, 19, 59, 27, 49, 17, 57, 25,
+        15, 47,  7, 39, 13, 45,  5, 37,
+        63, 31, 55, 23, 61, 29, 53, 21,
+    };
+    lv_color_t *fb = eye_buffer;
+    uint8_t *dl = eye_dist;
+    for (int y = 0; y < EYE_CANVAS_SIZE; y++) {
+        const uint8_t *brow = &bayer8[(y & 7) << 3];
+        uint8_t *drow = dl + (size_t)y * EYE_CANVAS_SIZE;
+        lv_color_t *frow = fb + (size_t)y * EYE_CANVAS_SIZE;
+        for (int x = 0; x < EYE_CANVAS_SIZE; x++) {
+            uint8_t d = drow[x];
+            if (d >= EYE_PROFILE_MAX) { frow[x] = lv_color_black(); continue; }
+            int bt = (int)brow[x & 7] - 32;         // -32..+31
+            int r = profR[d] + ((bt * 10) >> 6);    // red step ~8 (5-bit channel)
+            int g = profG[d] + ((bt *  6) >> 6);    // green step ~4 (6-bit channel)
+            int b = profB[d] + ((bt * 10) >> 6);
+            if (r > 255) r = 255; else if (r < 0) r = 0;
+            if (g > 255) g = 255; else if (g < 0) g = 0;
+            if (b > 255) b = 255; else if (b < 0) b = 0;
+            frow[x] = lv_color_make((uint8_t)r, (uint8_t)g, (uint8_t)b);
+        }
     }
 
-    // Outer glow halo breathes in size and intensity.
-    int glow = (EYE_OUTER_RADIUS * 2) + 24 + (int)(breathe * 26);
-    lv_obj_set_size(outer_glow, glow, glow);
-    lv_obj_align(outer_glow, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_set_style_bg_color(outer_glow, lv_color_make((uint8_t)(48 * brightness), 0, 0), 0);
+    // --- Specular glint: a bright highlight that orbits the lens -------------
+    // During "thinking" it sweeps the mid-lens like a scanning beam; otherwise it
+    // hovers near the core like a reflection on glass.
+    float ga = ms * c->glintSpeed;
+    float orbitR = (eye_state == EYE_THINKING) ? 125.0f : (EYE_R_HALO * 0.55f);
+    int gcx = EYE_CANVAS_CENTER + (int)(cosf(ga) * orbitR) - 2;
+    int gcy = EYE_CANVAS_CENTER + (int)(sinf(ga) * orbitR) - 3;
+    const int gr = 7;
+    for (int dy = -gr; dy <= gr; dy++) {
+        int py = gcy + dy;
+        if (py < 0 || py >= EYE_CANVAS_SIZE) continue;
+        for (int dx = -gr; dx <= gr; dx++) {
+            int px = gcx + dx;
+            if (px < 0 || px >= EYE_CANVAS_SIZE) continue;
+            float d2 = (float)(dx * dx + dy * dy);
+            if (d2 > (float)(gr * gr)) continue;
+            float a = 1.0f - sqrtf(d2) / (float)gr;
+            a *= a;
+            if (a < 0.12f) continue;
+            fb[(size_t)py * EYE_CANVAS_SIZE + px] =
+                lv_color_make(255, (uint8_t)(210 + 45 * a), (uint8_t)(150 + 95 * a));
+        }
+    }
 
-    // Gold halo shimmers; white-hot core dilates with its own faster rhythm.
-    float shimmer = 0.5f + 0.5f * sinf(ms * 0.006f);
-    uint8_t halo_g = 180 + (uint8_t)(shimmer * 55);
-    lv_obj_set_style_bg_color(center_yellow, lv_color_make(255, halo_g, (uint8_t)(45 + shimmer * 45)), 0);
-    int coreR = EYE_HIGHLIGHT_RADIUS + (int)(shimmer * 3);
-    lv_obj_set_size(center_highlight, coreR * 2, coreR * 2);
-    lv_obj_align(center_highlight, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_set_style_bg_opa(center_highlight, (lv_opa_t)(210 + (int)(shimmer * 45)), 0);
-
-    // Specular glint slowly orbits, like light tracking across a glass lens.
-    float ga = ms * glintSpeed;
-    int gx = (int)(cosf(ga) * 11.0f) - 2;
-    int gy = (int)(sinf(ga) * 11.0f) - 3;
-    lv_obj_align(center_glint, LV_ALIGN_CENTER, gx, gy);
+    lv_obj_invalidate(eye_canvas);
 }
 
 void check_display_state(void)
@@ -395,14 +536,29 @@ void check_display_state(void)
             const char* mode = doc["mode"];
             DisplayMode new_mode = (strcmp(mode, "face") == 0) ? MODE_FACE : MODE_EYE;
 
-            // Get state
+            // Get state -> which eye animation to play
             if (doc["state"].is<const char*>()) {
                 hal_state = doc["state"].as<String>();
-                hal_listening = hal_state.indexOf("awaiting") >= 0 ||
-                               hal_state.indexOf("listening") >= 0;
-                hal_speaking = hal_state.indexOf("asking") >= 0 ||
-                              hal_state.indexOf("confirming") >= 0 ||
-                              hal_state.indexOf("speaking") >= 0;
+                EyeState ns;
+                if (hal_state == "speaking")       ns = EYE_SPEAKING;
+                else if (hal_state == "thinking")  ns = EYE_THINKING;
+                else if (hal_state == "listening") ns = EYE_LISTENING;
+                else                               ns = EYE_IDLE;   // idle / offline
+                // Legacy substring fallback for older backends.
+                if (ns == EYE_IDLE) {
+                    if (hal_state.indexOf("awaiting") >= 0 || hal_state.indexOf("listening") >= 0)
+                        ns = EYE_LISTENING;
+                    else if (hal_state.indexOf("asking") >= 0 || hal_state.indexOf("confirming") >= 0 ||
+                             hal_state.indexOf("speaking") >= 0)
+                        ns = EYE_SPEAKING;
+                }
+                if (ns != eye_state) {
+                    eye_state_prev = eye_state;
+                    eye_state = ns;
+                    eye_accent_t0 = millis();   // trigger the transition accent ring
+                }
+                hal_listening = (eye_state == EYE_LISTENING);
+                hal_speaking  = (eye_state == EYE_SPEAKING);
             }
 
             // Get person name
@@ -428,9 +584,11 @@ void check_display_state(void)
             lvgl_port_lock(-1);
             if (current_mode == MODE_FACE && current_person.length() > 0) {
                 lv_label_set_text(status_label, current_person.c_str());
-            } else if (hal_listening) {
+            } else if (eye_state == EYE_LISTENING) {
                 lv_label_set_text(status_label, "Listening...");
-            } else if (hal_speaking) {
+            } else if (eye_state == EYE_THINKING) {
+                lv_label_set_text(status_label, "Thinking...");
+            } else if (eye_state == EYE_SPEAKING) {
                 lv_label_set_text(status_label, "Speaking...");
             } else {
                 lv_label_set_text(status_label, "HAL 9000 Online");
@@ -446,35 +604,15 @@ void check_display_state(void)
 
 void show_eye_mode(void)
 {
-    // Show eye objects
-    lv_obj_clear_flag(outer_glow, LV_OBJ_FLAG_HIDDEN);
-    for (int i = 0; i < EYE_NUM_RINGS; i++) lv_obj_clear_flag(rings[i], LV_OBJ_FLAG_HIDDEN);
-    lv_obj_clear_flag(center_yellow, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_clear_flag(center_highlight, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_clear_flag(center_glint, LV_OBJ_FLAG_HIDDEN);
-
-    // Hide face canvas
-    if (face_canvas) {
-        lv_obj_add_flag(face_canvas, LV_OBJ_FLAG_HIDDEN);
-    }
-
+    if (eye_canvas) lv_obj_clear_flag(eye_canvas, LV_OBJ_FLAG_HIDDEN);
+    if (face_canvas) lv_obj_add_flag(face_canvas, LV_OBJ_FLAG_HIDDEN);
     Serial.println("Switched to EYE mode");
 }
 
 void show_face_mode(void)
 {
-    // Hide eye objects
-    lv_obj_add_flag(outer_glow, LV_OBJ_FLAG_HIDDEN);
-    for (int i = 0; i < EYE_NUM_RINGS; i++) lv_obj_add_flag(rings[i], LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(center_yellow, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(center_highlight, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(center_glint, LV_OBJ_FLAG_HIDDEN);
-
-    // Show face canvas
-    if (face_canvas) {
-        lv_obj_clear_flag(face_canvas, LV_OBJ_FLAG_HIDDEN);
-    }
-
+    if (eye_canvas) lv_obj_add_flag(eye_canvas, LV_OBJ_FLAG_HIDDEN);
+    if (face_canvas) lv_obj_clear_flag(face_canvas, LV_OBJ_FLAG_HIDDEN);
     Serial.println("Switched to FACE mode");
 }
 
