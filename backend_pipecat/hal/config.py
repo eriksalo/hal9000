@@ -96,6 +96,8 @@ class AudioConfig:
     input_gate_rms: float = 0.0
     input_target_rms: float = 0.0
     input_max_gain: float = 30.0
+    echo_mute: bool = True
+    echo_mute_hangover_secs: float = 0.4
 
 
 @dataclass(frozen=True)
@@ -248,6 +250,8 @@ def load_config(dotenv_path: Path | None = None) -> HALConfig:
             input_gate_rms=_env_float("AUDIO_INPUT_GATE_RMS", 0.0),
             input_target_rms=_env_float("AUDIO_INPUT_TARGET_RMS", 0.0),
             input_max_gain=_env_float("AUDIO_INPUT_MAX_GAIN", 30.0),
+            echo_mute=_env_bool("ECHO_MUTE", True),
+            echo_mute_hangover_secs=_env_float("ECHO_MUTE_HANGOVER_SECS", 0.4),
         ),
         turn=TurnConfig(
             smart_turn_enabled=_env_bool("SMART_TURN_ENABLED", True),

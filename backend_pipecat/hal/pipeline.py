@@ -44,6 +44,7 @@ from hal.prompts import (
 )
 from hal.services.llm import build_claude, build_offline_llm
 from hal.services.audio_gain import InputGainProcessor
+from hal.services.echo_mute import EchoMuteProcessor
 from hal.services.stt import build_stt, build_user_turn_strategies, build_vad, stt_provides_turn_detection
 from hal.services.tts import build_tts
 from hal.state import HALState
@@ -230,6 +231,8 @@ class HALSession:
 
         input_stage = [self.transport.input()]
         a = cfg.audio
+        if a.echo_mute:
+            input_stage.append(EchoMuteProcessor(hangover_secs=a.echo_mute_hangover_secs))
         if a.input_gain != 1.0 or a.input_gate_rms > 0.0 or a.input_target_rms > 0.0:
             input_stage.append(
                 InputGainProcessor(
