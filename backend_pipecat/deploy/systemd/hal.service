@@ -10,7 +10,7 @@ WorkingDirectory=/home/erik/hal9000/backend_pipecat
 EnvironmentFile=/home/erik/hal9000/backend_pipecat/.env
 Environment="PYTHONUNBUFFERED=1"
 Environment="XDG_RUNTIME_DIR=/run/user/1000"
-ExecStartPre=/home/erik/hal9000/backend_pipecat/scripts/set_mic_gain.sh
+ExecStartPre=/home/erik/hal9000/backend_pipecat/scripts/set_audio_gain.sh
 ExecStart=/home/erik/hal9000/.venv/bin/python hal_autonomous.py
 Restart=on-failure
 RestartSec=5

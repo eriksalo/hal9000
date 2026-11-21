@@ -2,21 +2,29 @@
 
 System-level configuration that lives outside the Python package. These are the
 pieces needed to reproduce the working Pi deployment (Raspberry Pi 5, PipeWire,
-CMTECK USB mic + USB speaker, Pi Camera).
+ReSpeaker XVF3800 4-Mic Array with a speaker on its JST connector, Pi Camera).
 
-## Audio: full-duplex with WebRTC echo cancellation
+## Audio: ReSpeaker XVF3800 (hardware AEC over USB)
 
-HAL uses a single USB mic (CMTECK) and a separate USB speaker. Without acoustic
-echo cancellation the mic hears HAL's own voice, which causes HAL to transcribe
-itself and to interrupt its own speech (choppy output). The fix is PipeWire's
-`module-echo-cancel` (WebRTC), which inserts a virtual echo-cancelled mic and a
-virtual sink between HAL and the hardware, and also provides AGC + noise
-suppression (so no manual mic-gain tuning is needed).
+HAL's mic and speaker are both the **Seeed ReSpeaker XVF3800 4-Mic Array**,
+connected over USB-C, with a passive 8Ω speaker wired to the board's JST
+connector (driven by the onboard LM48511 class-D amp). The XVF3800 is a
+VocalFusion speakerphone SoC: it does **acoustic echo cancellation, AGC,
+beamforming and noise suppression in hardware**. HAL's TTS is sent down the USB
+cable, the board plays it on the JST speaker and uses it as the AEC far-end
+reference, and the mic capture comes back already echo-cancelled — so HAL does
+not hear its own voice and does not interrupt itself.
 
 ```
-CMTECK ───▶ echo-cancel-capture ─[WebRTC AEC]─▶ echo_cancel_source ─▶ HAL (captures)
-USB spk ◀── echo-cancel-playback ◀────────────── echo_cancel_sink  ◀─ HAL (plays TTS)
+HAL (plays TTS) ─USB─▶ XVF3800 ─▶ JST speaker (8Ω)
+HAL (captures)  ◀USB─ XVF3800 mic array  [HW AEC/AGC/beamforming/NS]
 ```
+
+The board is USB UAC, **locked to 16 kHz, S16_LE, 2ch** (`/proc/asound/card2/stream0`);
+it advertises no other rate. PipeWire still runs (routing + any resampling), but
+the **software WebRTC echo-cancel is NOT used** — it would double-process against
+the hardware AEC. The legacy `deploy/pipewire/99-hal-echo-cancel.conf` is kept
+only for reference / a non-AEC mic; do not install it with the ReSpeaker.
 
 ### One-time setup
 
@@ -26,37 +34,36 @@ systemctl --user unmask pipewire.service pipewire-pulse.service
 systemctl --user start  pipewire.service pipewire-pulse.service wireplumber.service
 loginctl enable-linger erik      # so they start at boot without a login
 
-# 2. ALSA->PipeWire bridge, so PyAudio/PortAudio can reach the virtual devices.
+# 2. ALSA->PipeWire bridge, so PyAudio/PortAudio can reach PipeWire.
 sudo apt-get install -y pipewire-alsa
 
-# 3. Echo-cancel module config (creates echo_cancel_source / echo_cancel_sink).
-mkdir -p ~/.config/pipewire/pipewire.conf.d
-cp deploy/pipewire/99-hal-echo-cancel.conf ~/.config/pipewire/pipewire.conf.d/
-systemctl --user restart pipewire pipewire-pulse wireplumber
-
-# 4. Make the cancelled nodes the defaults (ids from `wpctl status`).
-wpctl set-default <echo_cancel_source id>
-wpctl set-default <echo_cancel_sink id>
+# 3. Make the ReSpeaker the default sink + source (ids from `wpctl status`).
+wpctl set-default <reSpeaker sink id>
+wpctl set-default <reSpeaker source id>
 ```
 
-After this, PyAudio enumerates a `pipewire` device (index 2 here) that routes to
-the echo-cancelled nodes. HAL is pointed at it via `AUDIO_INPUT_DEVICE_INDEX=2`
-and `AUDIO_OUTPUT_DEVICE_INDEX=2` in `.env`.
+PyAudio exposes only `pipewire` / `default` devices (not raw `hw:`), both routed
+to the PipeWire default nodes. HAL leaves `AUDIO_INPUT_DEVICE_INDEX` /
+`AUDIO_OUTPUT_DEVICE_INDEX` **unset** in `.env` so it follows that default — do
+not hardcode a numeric index (it drifts when the node graph changes). Sample
+rates are `AUDIO_IN_SAMPLE_RATE=16000` / `AUDIO_OUT_SAMPLE_RATE=16000`, and
+`ECHO_MUTE=false` (the software echo-mute is unnecessary with hardware AEC, and
+turning it off keeps barge-in working).
 
-### Mic gain quirk (CMTECK / MV-SILICON chip)
+### Playback gain (ReSpeaker)
 
-The CMTECK reports its capture-gain control with a broken resolution, so ALSA
-shows "100%" without actually applying it after a power-cycle — capture comes
-back as pure noise floor. The value must be *written* to take effect.
-`scripts/set_mic_gain.sh` does this and runs as an `ExecStartPre` of the HAL
-service. (With the WebRTC AGC in front this matters less, but it keeps the raw
-feed into the canceller at a sane level.)
+The board's USB mixer boots with its PCM playback controls attenuated — `'PCM',1`
+comes up at **−20 dB** — which makes the JST speaker very quiet, and ALSA mixer
+state is not persisted across a reboot or USB replug. `scripts/set_audio_gain.sh`
+sets both PCM playback controls to 0 dB and runs as an `ExecStartPre` of the HAL
+service. (PipeWire's own sink volume is separate; set it with
+`wpctl set-volume @DEFAULT_AUDIO_SINK@ 1.0`.)
 
 ## systemd
 
 `deploy/systemd/hal.service` — note the two additions vs a plain unit:
 
-- `ExecStartPre=.../scripts/set_mic_gain.sh` — write the CMTECK capture gain.
+- `ExecStartPre=.../scripts/set_audio_gain.sh` — set the ReSpeaker playback gain.
 - `Environment="XDG_RUNTIME_DIR=/run/user/1000"` — lets the service (User=erik)
   reach the PipeWire socket at `/run/user/1000/pipewire-0`.
 
@@ -68,8 +75,9 @@ sudo systemctl daemon-reload && sudo systemctl restart hal.service
 ## Pipeline notes (why the STT changes exist)
 
 - `PipelineParams` must set `audio_in_sample_rate` / `audio_out_sample_rate` to
-  the transport's real rates (48000/24000). The default is 16000; leaving it
-  meant Deepgram and the VAD both misread every frame and produced no output.
+  the device's real rate (16000 for the ReSpeaker). The default is also 16000,
+  but keep these explicit and matched to the device — a mismatch makes Deepgram
+  and the VAD misread every frame and produce no output.
 - The aggregator VAD is only wired for non-Flux STT. Deepgram Flux does its own
   server-side turn detection; attaching a local VAD there threw per-frame errors.
 
