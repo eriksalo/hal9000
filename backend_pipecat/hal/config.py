@@ -20,6 +20,9 @@ Effort = Literal["low", "medium", "high", "xhigh", "max"]
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
+# Custom "Hello, HAL" wake model (openWakeWord, trained on an RTX 4070; 250k clips).
+HELLO_HAL_WAKE_MODEL = str(PROJECT_ROOT / "backend_pipecat" / "wake_models" / "hello_hal.onnx")
+
 
 def _env(name: str, default: str = "") -> str:
     return os.environ.get(name, default).strip()
@@ -118,7 +121,7 @@ class WakeConfig:
     """Local wake-word detection (openWakeWord) so idle costs nothing."""
 
     enabled: bool = True
-    model_path: str = "hey_jarvis"  # stock model name, or a path to a custom .onnx
+    model_path: str = HELLO_HAL_WAKE_MODEL  # stock openWakeWord name, or a path to a custom .onnx
     threshold: float = 0.5
     trigger_frames: int = 1
     refractory_secs: float = 3.0
@@ -298,7 +301,7 @@ def load_config(dotenv_path: Path | None = None) -> HALConfig:
         ),
         wake=WakeConfig(
             enabled=_env_bool("WAKE_ENABLED", True),
-            model_path=_env("WAKE_MODEL", "hey_jarvis"),
+            model_path=_env("WAKE_MODEL", HELLO_HAL_WAKE_MODEL),
             threshold=_env_float("WAKE_THRESHOLD", 0.5),
             trigger_frames=_env_int("WAKE_TRIGGER_FRAMES", 1),
             refractory_secs=_env_float("WAKE_REFRACTORY_SECS", 3.0),
