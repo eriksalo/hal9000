@@ -109,6 +109,10 @@ class WakeWordListener:
         self._last_fire = 0.0
         self.last_score = 0.0
         self._debug_peak = 0.0
+        self._hb_last = 0.0
+        self._hb_frames = 0
+        self._hb_rms = 0.0
+        self._hb_score = 0.0
 
     @property
     def phrase(self) -> str:
@@ -226,6 +230,7 @@ class WakeWordListener:
         score = float(scores.get(self._key, 0.0))
         self.last_score = score
         if self.config.debug_scores:
+            self._heartbeat(samples, score)
             self._debug_watch(score)
         if score < self.config.threshold:
             self._above = 0
@@ -240,6 +245,29 @@ class WakeWordListener:
         self._model.reset()
         self._fire()
         return True
+
+    def _heartbeat(self, samples: np.ndarray, score: float) -> None:
+        """Every 5 s, log that the listener is reading audio (WAKE_DEBUG_SCORES=true).
+
+        ``frames`` > 0 means the capture thread is alive and reading; ``rms_peak``
+        near 0 means the mic is delivering silence (deaf); a healthy ``rms_peak``
+        with a flat ``score_peak`` when you speak points at the model, not audio.
+        This is the probe for the "goes deaf after a conversation" handoff bug.
+        """
+        rms = float(np.sqrt(np.mean(samples.astype(np.float32) ** 2))) if samples.size else 0.0
+        self._hb_frames += 1
+        self._hb_rms = max(self._hb_rms, rms)
+        self._hb_score = max(self._hb_score, score)
+        now = time.monotonic()
+        if now - self._hb_last >= 5.0:
+            logger.info(
+                f"wake heartbeat: frames={self._hb_frames} rms_peak={self._hb_rms:.0f} "
+                f"score_peak={self._hb_score:.2f}"
+            )
+            self._hb_last = now
+            self._hb_frames = 0
+            self._hb_rms = 0.0
+            self._hb_score = 0.0
 
     def _debug_watch(self, score: float) -> None:
         """Log the peak score of each near-threshold burst (WAKE_DEBUG_SCORES=true).
