@@ -127,6 +127,7 @@ class WakeConfig:
     refractory_secs: float = 3.0
     inference_framework: str = "onnx"
     vad_threshold: float = 0.0
+    debug_scores: bool = False  # log each utterance's peak score for threshold tuning
 
 
 @dataclass(frozen=True)
@@ -307,6 +308,7 @@ def load_config(dotenv_path: Path | None = None) -> HALConfig:
             refractory_secs=_env_float("WAKE_REFRACTORY_SECS", 3.0),
             inference_framework=_env("WAKE_FRAMEWORK", "onnx"),
             vad_threshold=_env_float("WAKE_VAD_THRESHOLD", 0.0),
+            debug_scores=_env_bool("WAKE_DEBUG_SCORES", False),
         ),
         default_person=_env("PERSON_NAME", "Dave"),
         timezone=_env("TIMEZONE", "America/Denver"),

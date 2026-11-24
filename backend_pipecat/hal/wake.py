@@ -108,6 +108,7 @@ class WakeWordListener:
         self._above = 0
         self._last_fire = 0.0
         self.last_score = 0.0
+        self._debug_peak = 0.0
 
     @property
     def phrase(self) -> str:
@@ -224,6 +225,8 @@ class WakeWordListener:
         scores = self._model.predict(samples)
         score = float(scores.get(self._key, 0.0))
         self.last_score = score
+        if self.config.debug_scores:
+            self._debug_watch(score)
         if score < self.config.threshold:
             self._above = 0
             return False
@@ -237,6 +240,22 @@ class WakeWordListener:
         self._model.reset()
         self._fire()
         return True
+
+    def _debug_watch(self, score: float) -> None:
+        """Log the peak score of each near-threshold burst (WAKE_DEBUG_SCORES=true).
+
+        Reports the high-water mark of every utterance that pokes above a low
+        floor, even when it never reaches ``threshold`` and so never fires. Lets
+        you see how close each "Hello, HAL" came and pick a threshold from real
+        numbers instead of guessing.
+        """
+        floor = 0.1
+        if score >= floor:
+            self._debug_peak = max(self._debug_peak, score)
+        elif self._debug_peak > 0.0:
+            fired = "FIRED" if self._debug_peak >= self.config.threshold else "missed"
+            logger.info(f"Wake '{self._key}' peak {self._debug_peak:.2f} ({fired}; threshold {self.config.threshold})")
+            self._debug_peak = 0.0
 
     def _fire(self) -> None:
         if self._loop is None:
