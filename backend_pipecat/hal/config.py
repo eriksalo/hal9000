@@ -154,7 +154,7 @@ class VisionConfig:
     departure_threshold_secs: float = 5.0
     greeting_cooldown_secs: float = 300.0
     detection_interval_secs: float = 0.2
-    name_hold_secs: float = 60.0
+    name_hold_secs: float = 120.0  # hold a recognized name under the eye for 2 min
 
 
 @dataclass(frozen=True)
@@ -287,7 +287,7 @@ def load_config(dotenv_path: Path | None = None) -> HALConfig:
             departure_threshold_secs=_env_float("DEPARTURE_THRESHOLD_SECS", 5.0),
             greeting_cooldown_secs=_env_float("GREETING_COOLDOWN_SECS", 300.0),
             detection_interval_secs=_env_float("DETECTION_INTERVAL_SECS", 0.2),
-            name_hold_secs=_env_float("NAME_HOLD_SECS", 60.0),
+            name_hold_secs=_env_float("NAME_HOLD_SECS", 120.0),
         ),
         hailo=HailoConfig(
             enabled=_env_bool("HAILO_ENABLED", False),

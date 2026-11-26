@@ -35,12 +35,15 @@ class HALState:
     def display_payload(self) -> dict:
         """Payload for GET /api/hal/display (consumed by the ESP32 firmware)."""
         return {
-            "mode": "face" if self.people_present else "eye",
+            # Keep HAL's eye on screen at all times; the recognised name shows
+            # under the eye rather than switching to the camera ("face") view.
+            "mode": "eye",
             # The ESP32 string-matches "listening"/"speaking" in this field.
             "state": self.mode,
-            # ``display_name`` is the recognised person, held for a minute
-            # after they leave (see AppContext._display_name_loop).
-            "person": self.person or self.display_name or (self.people_present[0] if self.people_present else None),
+            # ``display_name`` is the recognised person, held for ~2 minutes
+            # after they leave (see AppContext._display_name_loop). Only known
+            # names are shown - no "Unknown" fallback from people_present.
+            "person": self.person or self.display_name,
         }
 
     def status_payload(self) -> dict:

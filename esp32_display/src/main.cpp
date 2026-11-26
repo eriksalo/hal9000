@@ -580,9 +580,11 @@ void check_display_state(void)
                 lvgl_port_unlock();
             }
 
-            // Update status label
+            // Update status label. A recognized person's name (held ~2 min by
+            // the backend after they were last seen) takes priority and shows
+            // under the eye; the eye's color still conveys HAL's state.
             lvgl_port_lock(-1);
-            if (current_mode == MODE_FACE && current_person.length() > 0) {
+            if (current_person.length() > 0) {
                 lv_label_set_text(status_label, current_person.c_str());
             } else if (eye_state == EYE_LISTENING) {
                 lv_label_set_text(status_label, "Listening...");
