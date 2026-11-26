@@ -14,6 +14,7 @@ Cost on the Pi 5: ~5 ms of one core per 80 ms frame with the ONNX runtime.
 from __future__ import annotations
 
 import asyncio
+import queue
 import threading
 import time
 from collections.abc import Awaitable, Callable
@@ -113,6 +114,13 @@ class WakeWordListener:
         self._hb_frames = 0
         self._hb_rms = 0.0
         self._hb_score = 0.0
+        # Capture is decoupled from inference: a dedicated reader thread does
+        # nothing but drain the mic into this queue, so PortAudio never overflows
+        # even when face recognition / the pipeline hog the GIL. The consumer
+        # (``_run``) pulls frames and scores them, seeing continuous audio.
+        self._frames: queue.Queue[bytes] = queue.Queue(maxsize=256)
+        self._reader_thread: threading.Thread | None = None
+        self._read_gap_peak = 0.0  # worst gap between consecutive reads (ms), per heartbeat
 
     @property
     def phrase(self) -> str:
@@ -146,14 +154,23 @@ class WakeWordListener:
     def pause(self) -> None:
         """Stop listening (releases the mic) while a conversation is active."""
         self._set_enabled(False)
+        self._drain_queue()
 
     def resume(self) -> None:
         """Resume listening after a conversation, ignoring any trailing audio."""
         self._above = 0
         self._last_fire = time.monotonic()  # brief refractory so the TTS tail is skipped
+        self._drain_queue()  # discard anything captured during the handoff
         if self._model is not None:
             self._model.reset()
         self._set_enabled(True)
+
+    def _drain_queue(self) -> None:
+        while True:
+            try:
+                self._frames.get_nowait()
+            except queue.Empty:
+                return
 
     def _set_enabled(self, value: bool) -> None:
         if value:
@@ -193,17 +210,24 @@ class WakeWordListener:
                 pass
             self._pa = None
 
-    def _run(self) -> None:
+    def _reader_loop(self) -> None:
+        """Dedicated capture thread: do nothing but drain the mic into the queue.
+
+        Keeping inference (``predict``) out of this loop is the whole point: the
+        read stays within its 80 ms deadline even while face recognition or the
+        pipeline hold the GIL, so PortAudio never overflows and the audio handed
+        to the model stays continuous (openWakeWord scores near 0 on gappy audio).
+        """
+        last_read = 0.0
         while not self._stop.is_set():
             if not self._enabled.is_set():
                 self._close_stream()
+                last_read = 0.0
                 self._enabled.wait(timeout=0.2)
                 continue
             if self._stream is None:
                 try:
                     self._open_stream()
-                    if self._model is not None:
-                        self._model.reset()
                 except Exception as exc:
                     logger.warning(f"Wake mic open failed ({exc}); retrying")
                     self._close_stream()
@@ -216,8 +240,36 @@ class WakeWordListener:
                 self._close_stream()
                 self._stop.wait(0.5)
                 continue
-            self.process(np.frombuffer(data, dtype=np.int16))
+            now = time.monotonic()
+            if last_read:
+                self._read_gap_peak = max(self._read_gap_peak, (now - last_read) * 1000.0)
+            last_read = now
+            try:
+                self._frames.put_nowait(data)
+            except queue.Full:
+                # Consumer hopelessly behind (should not happen: predict is ~5 ms
+                # vs the 80 ms frame). Drop the oldest to bound detection latency.
+                try:
+                    self._frames.get_nowait()
+                except queue.Empty:
+                    pass
+                self._frames.put_nowait(data)
         self._close_stream()
+
+    def _run(self) -> None:
+        self._reader_thread = threading.Thread(target=self._reader_loop, name="hal-wake-read", daemon=True)
+        self._reader_thread.start()
+        if self._model is not None:
+            self._model.reset()
+        while not self._stop.is_set():
+            try:
+                data = self._frames.get(timeout=0.2)
+            except queue.Empty:
+                continue
+            if self._enabled.is_set():
+                self.process(np.frombuffer(data, dtype=np.int16))
+        self._reader_thread.join(2.0)
+        self._reader_thread = None
         logger.info("Wake word listener stopped")
 
     # ---- detection -------------------------------------------------------------
@@ -262,12 +314,13 @@ class WakeWordListener:
         if now - self._hb_last >= 5.0:
             logger.info(
                 f"wake heartbeat: frames={self._hb_frames} rms_peak={self._hb_rms:.0f} "
-                f"score_peak={self._hb_score:.2f}"
+                f"score_peak={self._hb_score:.2f} read_gap_peak={self._read_gap_peak:.0f}ms"
             )
             self._hb_last = now
             self._hb_frames = 0
             self._hb_rms = 0.0
             self._hb_score = 0.0
+            self._read_gap_peak = 0.0
 
     def _debug_watch(self, score: float) -> None:
         """Log the peak score of each near-threshold burst (WAKE_DEBUG_SCORES=true).
