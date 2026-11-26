@@ -307,9 +307,10 @@ void create_hal_eye(void)
     int label_dx = (int)(-UI_LABEL_RADIUS * sinf(ui_rad));
     int label_dy = (int)( UI_LABEL_RADIUS * cosf(ui_rad));
     lv_obj_align(status_label, LV_ALIGN_CENTER, label_dx, label_dy);
-    lv_obj_set_style_transform_pivot_x(status_label, 100, 0);  // half of the fixed width
-    lv_obj_set_style_transform_pivot_y(status_label, 10, 0);
-    lv_obj_set_style_transform_angle(status_label, (int)(UI_ROTATION_DEG * 10.0f), 0);  // 0.1deg units, CW
+    // No transform_angle: rotating a label needs LV_COLOR_SCREEN_TRANSP, which
+    // can't be enabled at LV_COLOR_DEPTH 16, so the rotated label never rendered
+    // (LVGL spammed "needs LV_COLOR_SCREEN_TRANSP 1"). Draw the text upright at
+    // the mount's "bottom" position instead.
 
     // Procedural animation timer (~30fps).
     lv_timer_create(update_hal_eye, 33, NULL);
