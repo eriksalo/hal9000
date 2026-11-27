@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <title>HAL 9000</title>
+  <defs>
+    <!-- Dark metallic bezel -->
+    <radialGradient id="bezel" cx="50%" cy="42%" r="60%">
+      <stop offset="0%" stop-color="#202020"/>
+      <stop offset="70%" stop-color="#0d0d0d"/>
+      <stop offset="100%" stop-color="#000000"/>
+    </radialGradient>
+    <!-- Eye body: red -> dark red -> black (matches .hal-eye) -->
+    <radialGradient id="eye" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ff0000"/>
+      <stop offset="50%" stop-color="#8b0000"/>
+      <stop offset="100%" stop-color="#000000"/>
+    </radialGradient>
+    <!-- Glowing lens: yellow -> red (matches .eye-inner) -->
+    <radialGradient id="lens" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffff00"/>
+      <stop offset="100%" stop-color="#ff0000"/>
+    </radialGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ff0000" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#ff0000" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Bezel plate -->
+  <circle cx="16" cy="16" r="16" fill="url(#bezel)"/>
+  <circle cx="16" cy="16" r="15.3" fill="none" stroke="#2a0000" stroke-width="0.7"/>
+
+  <!-- Outer red glow -->
+  <circle cx="16" cy="16" r="13" fill="url(#glow)"/>
+
+  <!-- Eye body -->
+  <circle cx="16" cy="16" r="10.5" fill="url(#eye)"/>
+
+  <!-- Glowing central lens -->
+  <circle cx="16" cy="16" r="3.6" fill="url(#lens)"/>
+
+  <!-- Tiny specular highlight -->
+  <circle cx="14.7" cy="14.7" r="0.9" fill="#ffffff" fill-opacity="0.85"/>
+</svg>
