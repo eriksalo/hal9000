@@ -112,7 +112,10 @@ class Camera:
         while self._running:
             frame = self._device.capture_array("main")
             if frame is not None:
-                bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                # picamera2's "RGB888" delivers bytes in BGR order already (its
+                # format names are reversed), which is exactly what OpenCV wants.
+                # Do NOT cvtColor here or red/blue get swapped (red looks blue).
+                bgr = frame
                 if self.config.rotate_180:
                     bgr = cv2.rotate(bgr, cv2.ROTATE_180)
                 with self._lock:
