@@ -43,11 +43,14 @@ using namespace esp_panel::board;
 #define EYE_R_GLOW   236.0f            // soft glow fades to black by here (near the rim)
 
 // On-screen content rotation to compensate for a physically rotated mount.
-// Positive = clockwise (as the viewer sees it). The eye is radially symmetric so
-// only the status text is visibly affected; flip the sign if the mount tilts the
-// other way. 0 = no rotation.
-#define UI_ROTATION_DEG   30.0f
-#define UI_LABEL_RADIUS   214.0f       // distance of the status text from center (near the rim)
+// The status text is drawn on a canvas image (not a label) so it can actually be
+// rotated at LV_COLOR_DEPTH 16. This one knob both rotates the text upright for
+// the viewer AND swings it to the viewer's "6 o'clock" (under the eye).
+// Increase to rotate the text clockwise in screen space / swing it further; the
+// display here reads upright at ~60. The eye is radially symmetric so it's
+// unaffected. 0 = no compensation (text upright at true screen bottom).
+#define UI_ROTATION_DEG   60.0f
+#define UI_LABEL_RADIUS   195.0f       // distance of the status text from center
 
 // Display modes
 enum DisplayMode {
@@ -67,7 +70,46 @@ enum EyeState {
 static lv_obj_t  *eye_canvas = NULL;
 static lv_color_t *eye_buffer = NULL;   // EYE_CANVAS_SIZE^2 pixels
 static uint8_t    *eye_dist = NULL;     // per-pixel distance from center (EYE_DIST_OUTSIDE = black)
-static lv_obj_t  *status_label = NULL;
+// Status text: drawn onto a rotatable canvas image (a label can't rotate at
+// 16-bit color), so the recognized name reads upright on the tilted mount.
+#define STATUS_CANVAS_W   180
+#define STATUS_CANVAS_H   44
+static lv_obj_t  *status_canvas = NULL;
+static lv_color_t *status_buffer = NULL;  // TRUE_COLOR_ALPHA, PSRAM
+
+// Redraw the status canvas with new text: clear to transparent, snug dark pill,
+// red text centered. Rotation/position are set once on the object (see setup).
+// Callers must already hold the LVGL lock.
+static void set_status_text(const char *txt)
+{
+    if (status_canvas == NULL) return;
+    const lv_font_t *font = &lv_font_montserrat_16;
+
+    lv_canvas_fill_bg(status_canvas, lv_color_black(), LV_OPA_TRANSP);
+
+    lv_point_t sz;
+    lv_txt_get_size(&sz, txt, font, 0, 0, STATUS_CANVAS_W, LV_TEXT_FLAG_NONE);
+
+    lv_coord_t pill_w = sz.x + 20;
+    if (pill_w > STATUS_CANVAS_W) pill_w = STATUS_CANVAS_W;
+    lv_coord_t pill_h = sz.y + 6;
+    if (pill_h > STATUS_CANVAS_H) pill_h = STATUS_CANVAS_H;
+    lv_draw_rect_dsc_t rdsc;
+    lv_draw_rect_dsc_init(&rdsc);
+    rdsc.bg_color = lv_color_black();
+    rdsc.bg_opa = LV_OPA_50;
+    rdsc.radius = 8;
+    lv_canvas_draw_rect(status_canvas, (STATUS_CANVAS_W - pill_w) / 2,
+                        (STATUS_CANVAS_H - pill_h) / 2, pill_w, pill_h, &rdsc);
+
+    lv_draw_label_dsc_t ldsc;
+    lv_draw_label_dsc_init(&ldsc);
+    ldsc.color = lv_color_make(255, 60, 40);
+    ldsc.font = font;
+    ldsc.align = LV_TEXT_ALIGN_CENTER;
+    lv_canvas_draw_text(status_canvas, 0, (STATUS_CANVAS_H - sz.y) / 2,
+                        STATUS_CANVAS_W, &ldsc, txt);
+}
 
 // Animation state (set by the network poll, read by the LVGL render timer)
 static EyeState eye_state = EYE_IDLE;
@@ -224,12 +266,12 @@ void setup()
         Serial.printf("Backend URL: http://%s:%d/api/hal/display\n", api_host.c_str(), api_port);
 
         lvgl_port_lock(-1);
-        lv_label_set_text(status_label, "HAL 9000 Online");
+        set_status_text("HAL 9000 Online");
         lvgl_port_unlock();
     } else {
         Serial.println("\nWiFi failed!");
         lvgl_port_lock(-1);
-        lv_label_set_text(status_label, "Offline Mode");
+        set_status_text("Offline Mode");
         lvgl_port_unlock();
     }
 
@@ -289,28 +331,34 @@ void create_hal_eye(void)
     lv_obj_align(eye_canvas, LV_ALIGN_CENTER, 0, 0);
     lv_canvas_fill_bg(eye_canvas, lv_color_black(), LV_OPA_COVER);
 
-    // Status label, placed at the rotated "bottom" and tilted to match the mount.
-    // Fixed width + centered text keeps the rotation pivot stable as the text changes.
-    status_label = lv_label_create(lv_scr_act());
-    lv_obj_set_width(status_label, 200);
-    lv_obj_set_style_text_align(status_label, LV_TEXT_ALIGN_CENTER, 0);
-    lv_label_set_text(status_label, "Initializing...");
-    lv_obj_set_style_text_color(status_label, lv_color_make(255, 60, 40), 0);
-    lv_obj_set_style_text_font(status_label, &lv_font_montserrat_16, 0);
-    // Dark rounded backing so the text reads over the eye's glow.
-    lv_obj_set_style_bg_color(status_label, lv_color_black(), 0);
-    lv_obj_set_style_bg_opa(status_label, LV_OPA_50, 0);
-    lv_obj_set_style_pad_ver(status_label, 3, 0);
-    lv_obj_set_style_radius(status_label, 8, 0);
+    // Status text on a rotatable canvas image. Unlike a label, a canvas/image
+    // CAN rotate at LV_COLOR_DEPTH 16 (it owns its TRUE_COLOR_ALPHA buffer), so
+    // the text reads upright on the physically tilted mount. The buffer lives in
+    // PSRAM like the eye's.
+    status_canvas = lv_canvas_create(lv_scr_act());
+    size_t sbytes = LV_CANVAS_BUF_SIZE_TRUE_COLOR_ALPHA(STATUS_CANVAS_W, STATUS_CANVAS_H);
+    status_buffer = (lv_color_t *)heap_caps_malloc(sbytes, MALLOC_CAP_SPIRAM);
+    if (status_buffer == NULL) {
+        Serial.println("ERROR: Failed to allocate status canvas buffer in PSRAM!");
+        return;
+    }
+    lv_canvas_set_buffer(status_canvas, status_buffer, STATUS_CANVAS_W, STATUS_CANVAS_H,
+                         LV_IMG_CF_TRUE_COLOR_ALPHA);
+    lv_img_set_antialias(status_canvas, true);
 
+    // Rotate the drawn text clockwise by UI_ROTATION_DEG to cancel the mount's
+    // tilt, pivoting about the canvas center so it stays put as the text changes.
+    lv_img_set_pivot(status_canvas, STATUS_CANVAS_W / 2, STATUS_CANVAS_H / 2);
+    lv_img_set_angle(status_canvas, (int16_t)(UI_ROTATION_DEG * 10.0f));
+
+    // Swing the canvas center to the viewer's "bottom" (under the eye). Same
+    // angle: at the true mount angle this lands straight under the eye.
     float ui_rad = UI_ROTATION_DEG * 0.01745329f;   // degrees -> radians
     int label_dx = (int)(-UI_LABEL_RADIUS * sinf(ui_rad));
     int label_dy = (int)( UI_LABEL_RADIUS * cosf(ui_rad));
-    lv_obj_align(status_label, LV_ALIGN_CENTER, label_dx, label_dy);
-    // No transform_angle: rotating a label needs LV_COLOR_SCREEN_TRANSP, which
-    // can't be enabled at LV_COLOR_DEPTH 16, so the rotated label never rendered
-    // (LVGL spammed "needs LV_COLOR_SCREEN_TRANSP 1"). Draw the text upright at
-    // the mount's "bottom" position instead.
+    lv_obj_align(status_canvas, LV_ALIGN_CENTER, label_dx, label_dy);
+
+    set_status_text("Initializing...");
 
     // Procedural animation timer (~30fps).
     lv_timer_create(update_hal_eye, 33, NULL);
@@ -586,15 +634,15 @@ void check_display_state(void)
             // under the eye; the eye's color still conveys HAL's state.
             lvgl_port_lock(-1);
             if (current_person.length() > 0) {
-                lv_label_set_text(status_label, current_person.c_str());
+                set_status_text(current_person.c_str());
             } else if (eye_state == EYE_LISTENING) {
-                lv_label_set_text(status_label, "Listening...");
+                set_status_text("Listening...");
             } else if (eye_state == EYE_THINKING) {
-                lv_label_set_text(status_label, "Thinking...");
+                set_status_text("Thinking...");
             } else if (eye_state == EYE_SPEAKING) {
-                lv_label_set_text(status_label, "Speaking...");
+                set_status_text("Speaking...");
             } else {
-                lv_label_set_text(status_label, "HAL 9000 Online");
+                set_status_text("HAL 9000 Online");
             }
             lvgl_port_unlock();
         }
