@@ -50,7 +50,7 @@ using namespace esp_panel::board;
 // eye is radially symmetric so it's unaffected. 0 = no compensation: text upright
 // at true screen bottom, under the eye (correct for a straight mount).
 #define UI_ROTATION_DEG   0.0f
-#define UI_LABEL_RADIUS   175.0f       // distance of the status text from center
+#define UI_LABEL_RADIUS   150.0f       // distance of the status text from center
 
 // Display modes
 enum DisplayMode {
@@ -72,8 +72,8 @@ static lv_color_t *eye_buffer = NULL;   // EYE_CANVAS_SIZE^2 pixels
 static uint8_t    *eye_dist = NULL;     // per-pixel distance from center (EYE_DIST_OUTSIDE = black)
 // Status text: drawn onto a rotatable canvas image (a label can't rotate at
 // 16-bit color), so the recognized name reads upright on the tilted mount.
-#define STATUS_CANVAS_W   180
-#define STATUS_CANVAS_H   44
+#define STATUS_CANVAS_W   400
+#define STATUS_CANVAS_H   72
 static lv_obj_t  *status_canvas = NULL;
 static lv_color_t *status_buffer = NULL;  // TRUE_COLOR_ALPHA, PSRAM
 
@@ -83,22 +83,22 @@ static lv_color_t *status_buffer = NULL;  // TRUE_COLOR_ALPHA, PSRAM
 static void set_status_text(const char *txt)
 {
     if (status_canvas == NULL) return;
-    const lv_font_t *font = &lv_font_montserrat_16;
+    const lv_font_t *font = &lv_font_montserrat_48;
 
     lv_canvas_fill_bg(status_canvas, lv_color_black(), LV_OPA_TRANSP);
 
     lv_point_t sz;
     lv_txt_get_size(&sz, txt, font, 0, 0, STATUS_CANVAS_W, LV_TEXT_FLAG_NONE);
 
-    lv_coord_t pill_w = sz.x + 20;
+    lv_coord_t pill_w = sz.x + 28;
     if (pill_w > STATUS_CANVAS_W) pill_w = STATUS_CANVAS_W;
-    lv_coord_t pill_h = sz.y + 6;
+    lv_coord_t pill_h = sz.y + 10;
     if (pill_h > STATUS_CANVAS_H) pill_h = STATUS_CANVAS_H;
     lv_draw_rect_dsc_t rdsc;
     lv_draw_rect_dsc_init(&rdsc);
     rdsc.bg_color = lv_color_black();
     rdsc.bg_opa = LV_OPA_50;
-    rdsc.radius = 8;
+    rdsc.radius = 12;
     lv_canvas_draw_rect(status_canvas, (STATUS_CANVAS_W - pill_w) / 2,
                         (STATUS_CANVAS_H - pill_h) / 2, pill_w, pill_h, &rdsc);
 
