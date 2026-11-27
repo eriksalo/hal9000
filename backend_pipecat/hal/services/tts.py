@@ -35,11 +35,15 @@ def build_tts(config: HALConfig, *, session: aiohttp.ClientSession, provider: TT
         )
 
     if provider == "piper":
+        # pipecat's PiperHttpTTSService POSTs to base_url verbatim; the OHF-Voice /
+        # rhasspy piper.http_server synthesises on POST "/", not "/synthesize". Pass the
+        # server root so the request lands on the real endpoint.
         from pipecat.services.piper.tts import PiperHttpTTSService
 
-        base_url = tts_cfg.piper_url.rstrip("/")
-        if not base_url.endswith("/synthesize"):
-            base_url += "/synthesize"
-        return PiperHttpTTSService(base_url=base_url, aiohttp_session=session, sample_rate=tts_cfg.piper_sample_rate)
+        return PiperHttpTTSService(
+            base_url=tts_cfg.piper_url,
+            aiohttp_session=session,
+            sample_rate=tts_cfg.piper_sample_rate,
+        )
 
     raise ValueError(f"Unknown TTS provider: {provider}")
