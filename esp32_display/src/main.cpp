@@ -47,10 +47,10 @@ using namespace esp_panel::board;
 // rotated at LV_COLOR_DEPTH 16. This one knob both rotates the text upright for
 // the viewer AND swings it to the viewer's "6 o'clock" (under the eye).
 // Increase to rotate the text clockwise in screen space / swing it further; the
-// display here reads upright at ~60. The eye is radially symmetric so it's
-// unaffected. 0 = no compensation (text upright at true screen bottom).
-#define UI_ROTATION_DEG   60.0f
-#define UI_LABEL_RADIUS   195.0f       // distance of the status text from center
+// eye is radially symmetric so it's unaffected. 0 = no compensation: text upright
+// at true screen bottom, under the eye (correct for a straight mount).
+#define UI_ROTATION_DEG   0.0f
+#define UI_LABEL_RADIUS   175.0f       // distance of the status text from center
 
 // Display modes
 enum DisplayMode {
