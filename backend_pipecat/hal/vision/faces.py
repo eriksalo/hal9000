@@ -55,6 +55,15 @@ class FaceRecognizer:
         self.save()
         logger.info(f"Registered face for {name}")
 
+    def forget(self, name: str) -> bool:
+        """Remove a registered face. Returns True if a face was removed."""
+        with self._lock:
+            removed = self._known.pop(name, None) is not None
+        if removed:
+            self.save()
+            logger.info(f"Forgot face for {name}")
+        return removed
+
     def known_names(self) -> list[str]:
         with self._lock:
             return list(self._known)

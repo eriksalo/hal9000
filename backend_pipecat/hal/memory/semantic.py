@@ -104,6 +104,19 @@ class SemanticMemory:
         logger.info(f"Semantic memory: {written} memories written for {person}")
         return written
 
+    async def delete_all(self, person: str) -> bool:
+        """Forget every semantic memory for a person. No-op if mem0 is disabled."""
+        client = await self._client()
+        if client is None:
+            return False
+        try:
+            await asyncio.to_thread(client.delete_all, user_id=_user_id(person))
+        except Exception as exc:
+            logger.error(f"Semantic delete_all failed: {exc}")
+            return False
+        logger.info(f"Semantic memory cleared for {person}")
+        return True
+
     async def all_for(self, person: str, *, limit: int = 50) -> list[str]:
         client = await self._client()
         if client is None:

@@ -293,6 +293,52 @@ class AppContext:
         self.state.people_present = tracker.present()
         return True
 
+    # ---- people management ---------------------------------------------------------------
+
+    def list_people(self) -> list[dict]:
+        """Everyone HAL knows: union of enrolled faces and memory profiles."""
+        face_names = set(self.recognizer.known_names()) if self.recognizer else set()
+        mem_names = set(self.store.list_known_people())
+        tracker = self.presence.tracker if self.presence else None
+        present = set(tracker.present()) if tracker else set()
+        people: list[dict] = []
+        for name in sorted(face_names | mem_names, key=str.lower):
+            if name == UNKNOWN:
+                continue
+            profile = self.store.peek_profile(name) or {}
+            people.append(
+                {
+                    "name": name,
+                    "has_face": name in face_names,
+                    "has_memory": name in mem_names,
+                    "conversation_count": profile.get("conversation_count", 0),
+                    "last_seen": profile.get("last_seen"),
+                    "present": name in present,
+                }
+            )
+        return people
+
+    async def delete_person(self, name: str) -> dict:
+        """Forget a person entirely: face, filesystem memory, and semantic memory."""
+        name = name.strip()
+        if not name or name == UNKNOWN:
+            return {"ok": False, "error": "invalid name"}
+        session = self.session
+        if session is not None and session.person_name == name and not session._done.is_set():
+            return {"ok": False, "error": f"currently in conversation with {name}; end it first"}
+        face = self.recognizer.forget(name) if self.recognizer else False
+        memory = self.store.delete_person(name)
+        semantic = await self.semantic.delete_all(name)
+        tracker = self.presence.tracker if self.presence else None
+        if tracker:
+            tracker.tracked.pop(name, None)
+            self.state.people_present = tracker.present()
+        if self.state.display_name == name:
+            self.state.display_name = None
+        removed = face or memory or semantic
+        logger.info(f"Deleted person {name} (face={face}, memory={memory}, semantic={semantic})")
+        return {"ok": removed, "name": name, "face": face, "memory": memory, "semantic": semantic}
+
     # ---- status helpers ------------------------------------------------------------------
 
     def note_esp32(self, remote: str | None) -> None:

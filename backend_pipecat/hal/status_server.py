@@ -81,6 +81,19 @@ DASHBOARD_HTML = r"""<!doctype html>
   .pill { font-size:11px; padding:2px 8px; border-radius:10px; border:1px solid #333; color:#999; }
   .online { color:var(--green); border-color:#1e4; } .offline { color:var(--red); border-color:#611; }
   .tag { color:var(--dim); font-size:12px; }
+  .people-panel { grid-column:1 / -1; }
+  .people-head { display:flex; align-items:center; justify-content:space-between; }
+  .people { margin-top:8px; display:flex; flex-direction:column; gap:6px; }
+  .person { display:flex; align-items:center; gap:10px; padding:8px 10px; background:#101010;
+            border:1px solid #1d1d1d; border-radius:6px; }
+  .person .pname { font-size:15px; color:#fff; min-width:120px; }
+  .person .meta { color:var(--dim); font-size:12px; flex:1; }
+  .person .here { color:var(--green); }
+  .badge { font-size:10px; padding:1px 6px; border-radius:8px; border:1px solid #333; color:#999; }
+  .badge.face { border-color:#355; color:#8cc; } .badge.mem { border-color:#453; color:#cb8; }
+  .btn-del { background:#1c1010; border:1px solid #633; color:#e88; padding:5px 12px; border-radius:6px; cursor:pointer; }
+  .btn-del:hover { background:#3a1414; border-color:var(--red); color:#fff; }
+  .empty { color:var(--dim); font-size:13px; padding:6px 2px; }
 </style>
 </head>
 <body>
@@ -127,6 +140,14 @@ DASHBOARD_HTML = r"""<!doctype html>
     </div>
     <div class="sub" id="msg" style="margin-top:8px"></div>
   </div>
+
+  <div class="panel people-panel">
+    <div class="people-head">
+      <h2 style="margin:0">People HAL knows</h2>
+      <button onclick="loadPeople()">Refresh</button>
+    </div>
+    <div class="people" id="people"><div class="empty">loading&hellip;</div></div>
+  </div>
 </div>
 
 <script>
@@ -158,15 +179,46 @@ async function poll(){
 function refreshCam(){ $('cam').src = '/api/vision/frame?t=' + Date.now(); }
 async function post(url, body){
   try { const r = await fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body||{})});
-    const d = await r.json().catch(()=>({})); flash(JSON.stringify(d)); poll(); }
-  catch(e){ flash('request failed'); }
+    const d = await r.json().catch(()=>({})); flash(JSON.stringify(d)); poll(); loadPeople(); return d; }
+  catch(e){ flash('request failed'); return {}; }
 }
 function startConv(){ post('/api/hal/start', {name: $('startName').value || undefined}); }
 function endConv(){ post('/api/hal/end'); }
 function speak(){ const t=$('sayText').value.trim(); if(t){ post('/api/hal/speak',{text:t}); $('sayText').value=''; } }
 function register(){ const n=$('regName').value.trim(); if(n){ post('/api/hal/register',{name:n}); $('regName').value=''; } }
 
-poll(); setInterval(poll, 1000); setInterval(refreshCam, 1500);
+function badge(cls, text, color){
+  const b=document.createElement('span'); b.className='badge '+(cls||''); b.textContent=text;
+  if(color){ b.style.borderColor=color; b.style.color=color; } return b;
+}
+async function loadPeople(){
+  const box=$('people');
+  try {
+    const r=await fetch('/api/hal/people',{cache:'no-store'}); const list=(await r.json()).people||[];
+    box.innerHTML='';
+    if(!list.length){ box.innerHTML='<div class="empty">No one enrolled yet. HAL adds people as it meets them.</div>'; return; }
+    for(const p of list){
+      const row=document.createElement('div'); row.className='person';
+      const nm=document.createElement('div'); nm.className='pname'; nm.textContent=p.name; row.appendChild(nm);
+      const meta=document.createElement('div'); meta.className='meta';
+      const bits=[(p.conversation_count||0)+' conv'+(p.conversation_count===1?'':'s')];
+      if(p.last_seen) bits.push('last seen '+String(p.last_seen).replace('T',' '));
+      meta.textContent=bits.join('  •  '); row.appendChild(meta);
+      if(p.present) row.appendChild(badge('', 'here now', '#39d353'));
+      if(p.has_face) row.appendChild(badge('face','face'));
+      if(p.has_memory) row.appendChild(badge('mem','memory'));
+      const del=document.createElement('button'); del.className='btn-del'; del.textContent='Delete';
+      del.onclick=()=>delPerson(p.name); row.appendChild(del);
+      box.appendChild(row);
+    }
+  } catch(e){ box.innerHTML='<div class="empty">could not load people</div>'; }
+}
+async function delPerson(name){
+  if(!confirm('Delete '+name+'?\n\nThis erases their face, profile, notes, transcripts and semantic memory. It cannot be undone.')) return;
+  await post('/api/hal/delete', {name});
+}
+
+poll(); loadPeople(); setInterval(poll, 1000); setInterval(refreshCam, 1500); setInterval(loadPeople, 5000);
 </script>
 </body>
 </html>
@@ -184,6 +236,8 @@ def create_status_app(ctx: "AppContext") -> web.Application:
             web.get("/api/hal/face_frame", _face_frame),
             web.get("/api/vision/frame", _vision_frame),
             web.get("/api/hal/status", _status),
+            web.get("/api/hal/people", _people),
+            web.post("/api/hal/delete", _delete_person),
             web.post("/api/hal/speak", _speak),
             web.post("/api/hal/register", _register),
             web.post("/api/hal/start", _start),
@@ -244,6 +298,20 @@ async def _status(request: web.Request) -> web.Response:
     payload["esp32"] = ctx.esp32_info()
     payload["services"] = ctx.service_profile_info()
     return web.json_response(payload)
+
+
+async def _people(request: web.Request) -> web.Response:
+    ctx: AppContext = request.app["ctx"]
+    return web.json_response({"people": ctx.list_people()})
+
+
+async def _delete_person(request: web.Request) -> web.Response:
+    ctx: AppContext = request.app["ctx"]
+    name = str((await request.json()).get("name", "")).strip()
+    if not name:
+        return web.json_response({"error": "name required"}, status=400)
+    result = await ctx.delete_person(name)
+    return web.json_response(result, status=200 if result.get("ok") else 409)
 
 
 async def _speak(request: web.Request) -> web.Response:

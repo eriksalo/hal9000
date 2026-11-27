@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -136,6 +137,25 @@ class MemoryStore:
 
     def person_exists(self, name: str) -> bool:
         return (self.people_dir / slugify(name) / "profile.json").exists()
+
+    def peek_profile(self, name: str) -> dict[str, Any] | None:
+        """Read a person's profile without creating their directory. None if absent."""
+        path = self.people_dir / slugify(name) / "profile.json"
+        if not path.exists():
+            return None
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+
+    def delete_person(self, name: str) -> bool:
+        """Delete all on-disk memory for a person. Returns True if anything was removed."""
+        path = self.people_dir / slugify(name)
+        if not path.exists():
+            return False
+        shutil.rmtree(path, ignore_errors=True)
+        logger.info(f"Deleted memory directory for {name}")
+        return True
 
     def list_known_people(self) -> list[str]:
         names: list[str] = []
