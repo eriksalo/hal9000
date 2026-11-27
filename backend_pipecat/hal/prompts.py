@@ -144,7 +144,8 @@ def unknown_person_instruction(timezone: str = "America/Denver") -> str:
     _, prefix = time_of_day(timezone)
     return (
         f"Someone you do not recognize has appeared in front of your camera. Greet them with '{prefix}', "
-        "say you do not believe you have been introduced, and ask for their name. One or two sentences."
+        "say you do not believe you have been introduced, and ask for their name. When they give it, repeat "
+        "it back to confirm you have it right before you record it. One or two sentences."
     )
 
 
@@ -153,7 +154,8 @@ def wake_instruction(person_name: str, *, timezone: str = "America/Denver") -> s
     if person_name == UNKNOWN:
         return (
             "Someone you do not recognize just said your name to get your attention. "
-            "Acknowledge them in HAL's manner and, since you have not been introduced, ask for their name. One sentence."
+            "Acknowledge them in HAL's manner and, since you have not been introduced, ask for their name. "
+            "When they give it, repeat it back to confirm you have it right before you record it. One sentence."
         )
     return (
         f"{person_name} just said your name to get your attention. Acknowledge them by name in HAL's manner "

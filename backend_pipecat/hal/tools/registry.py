@@ -105,10 +105,13 @@ class HALToolbox:
                 FunctionSchema(
                     name="introduce_person",
                     description=(
-                        "Call this the moment someone you did not recognize tells you their name. "
-                        "It links their face to the name so you will know them next time."
+                        "Record a newly introduced person's name. Before calling this, repeat the name back "
+                        "to them and confirm you have it right (e.g. 'Erik — have I got that right?'); if they "
+                        "correct you, use the corrected version. Only call this once they have confirmed, and "
+                        "pass the confirmed name. It links their face to the name so you will know them next "
+                        "time, so do not call it on a name you have not yet confirmed."
                     ),
-                    properties={"name": {"type": "string", "description": "Their first name as they said it."}},
+                    properties={"name": {"type": "string", "description": "Their confirmed first name."}},
                     required=["name"],
                     handler=self._introduce_person,
                 )

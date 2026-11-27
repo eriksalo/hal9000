@@ -104,6 +104,24 @@ class SemanticMemory:
         logger.info(f"Semantic memory: {written} memories written for {person}")
         return written
 
+    async def rename(self, old: str, new: str) -> bool:
+        """Best-effort migrate a person's memories to a new name, then drop the old."""
+        client = await self._client()
+        if client is None:
+            return False
+        try:
+            existing = await asyncio.to_thread(client.get_all, user_id=_user_id(old), top_k=1000)
+            memories = [r["memory"] for r in existing.get("results", []) if r.get("memory")]
+            if memories:
+                messages = [{"role": "user", "content": m} for m in memories]
+                await asyncio.to_thread(client.add, messages, user_id=_user_id(new), infer=False)
+            await asyncio.to_thread(client.delete_all, user_id=_user_id(old))
+        except Exception as exc:
+            logger.error(f"Semantic rename failed: {exc}")
+            return False
+        logger.info(f"Semantic memory moved {old} -> {new}")
+        return True
+
     async def delete_all(self, person: str) -> bool:
         """Forget every semantic memory for a person. No-op if mem0 is disabled."""
         client = await self._client()

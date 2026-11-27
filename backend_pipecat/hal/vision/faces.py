@@ -55,6 +55,17 @@ class FaceRecognizer:
         self.save()
         logger.info(f"Registered face for {name}")
 
+    def rename(self, old: str, new: str) -> bool:
+        """Re-label a registered face. Returns True if a face was moved."""
+        with self._lock:
+            encoding = self._known.pop(old, None)
+            if encoding is None:
+                return False
+            self._known[new] = encoding
+        self.save()
+        logger.info(f"Renamed face {old} -> {new}")
+        return True
+
     def forget(self, name: str) -> bool:
         """Remove a registered face. Returns True if a face was removed."""
         with self._lock:

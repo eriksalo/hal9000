@@ -91,6 +91,8 @@ DASHBOARD_HTML = r"""<!doctype html>
   .person .here { color:var(--green); }
   .badge { font-size:10px; padding:1px 6px; border-radius:8px; border:1px solid #333; color:#999; }
   .badge.face { border-color:#355; color:#8cc; } .badge.mem { border-color:#453; color:#cb8; }
+  .btn-ren { background:#161616; border:1px solid #444; color:#ccc; padding:5px 12px; border-radius:6px; cursor:pointer; }
+  .btn-ren:hover { background:#262626; border-color:var(--amber); color:#fff; }
   .btn-del { background:#1c1010; border:1px solid #633; color:#e88; padding:5px 12px; border-radius:6px; cursor:pointer; }
   .btn-del:hover { background:#3a1414; border-color:var(--red); color:#fff; }
   .empty { color:var(--dim); font-size:13px; padding:6px 2px; }
@@ -207,6 +209,8 @@ async function loadPeople(){
       if(p.present) row.appendChild(badge('', 'here now', '#39d353'));
       if(p.has_face) row.appendChild(badge('face','face'));
       if(p.has_memory) row.appendChild(badge('mem','memory'));
+      const ren=document.createElement('button'); ren.className='btn-ren'; ren.textContent='Rename';
+      ren.onclick=()=>renPerson(p.name); row.appendChild(ren);
       const del=document.createElement('button'); del.className='btn-del'; del.textContent='Delete';
       del.onclick=()=>delPerson(p.name); row.appendChild(del);
       box.appendChild(row);
@@ -216,6 +220,13 @@ async function loadPeople(){
 async function delPerson(name){
   if(!confirm('Delete '+name+'?\n\nThis erases their face, profile, notes, transcripts and semantic memory. It cannot be undone.')) return;
   await post('/api/hal/delete', {name});
+}
+async function renPerson(name){
+  const nn=prompt('Rename '+name+' to:', name);
+  if(nn===null) return;
+  const t=nn.trim();
+  if(!t || t===name) return;
+  await post('/api/hal/rename', {old:name, new:t});
 }
 
 poll(); loadPeople(); setInterval(poll, 1000); setInterval(refreshCam, 1500); setInterval(loadPeople, 5000);
@@ -238,6 +249,7 @@ def create_status_app(ctx: "AppContext") -> web.Application:
             web.get("/api/hal/status", _status),
             web.get("/api/hal/people", _people),
             web.post("/api/hal/delete", _delete_person),
+            web.post("/api/hal/rename", _rename_person),
             web.post("/api/hal/speak", _speak),
             web.post("/api/hal/register", _register),
             web.post("/api/hal/start", _start),
@@ -311,6 +323,17 @@ async def _delete_person(request: web.Request) -> web.Response:
     if not name:
         return web.json_response({"error": "name required"}, status=400)
     result = await ctx.delete_person(name)
+    return web.json_response(result, status=200 if result.get("ok") else 409)
+
+
+async def _rename_person(request: web.Request) -> web.Response:
+    ctx: AppContext = request.app["ctx"]
+    body = await request.json()
+    old = str(body.get("old", "")).strip()
+    new = str(body.get("new", "")).strip()
+    if not old or not new:
+        return web.json_response({"error": "old and new names required"}, status=400)
+    result = await ctx.rename_person(old, new)
     return web.json_response(result, status=200 if result.get("ok") else 409)
 
 

@@ -19,7 +19,7 @@ from pipecat.transports.base_transport import BaseTransport
 from hal.config import HALConfig
 from hal.connectivity import is_online
 from hal.memory.semantic import SemanticMemory, build_mem0_config
-from hal.memory.store import MemoryStore
+from hal.memory.store import MemoryStore, slugify
 from hal.pipeline import HALSession, ServiceProfile, SessionDeps, SessionOpening
 from hal.state import HALState
 from hal.vision.camera import Camera
@@ -317,6 +317,37 @@ class AppContext:
                 }
             )
         return people
+
+    async def rename_person(self, old: str, new: str) -> dict:
+        """Re-label a person across face, filesystem memory, and semantic memory."""
+        old, new = old.strip(), new.strip()
+        if not old or not new or old == UNKNOWN or new == UNKNOWN:
+            return {"ok": False, "error": "invalid name"}
+        if new == old:
+            return {"ok": False, "error": "name unchanged"}
+        existing = set(self.recognizer.known_names()) if self.recognizer else set()
+        existing |= set(self.store.list_known_people())
+        if new in existing and slugify(new) != slugify(old):
+            return {"ok": False, "error": f"{new} already exists"}
+        session = self.session
+        if session is not None and session.person_name == old and not session._done.is_set():
+            return {"ok": False, "error": f"currently in conversation with {old}; end it first"}
+        face = self.recognizer.rename(old, new) if self.recognizer else False
+        memory = self.store.rename_person(old, new)
+        semantic = await self.semantic.rename(old, new)
+        tracker = self.presence.tracker if self.presence else None
+        if tracker and old in tracker.tracked:
+            person = tracker.tracked.pop(old)
+            person.name = new
+            tracker.tracked[new] = person
+            self.state.people_present = tracker.present()
+        if self.state.display_name == old:
+            self.state.display_name = new
+        removed = face or memory
+        if not removed:
+            return {"ok": False, "error": f"{old} not found"}
+        logger.info(f"Renamed person {old} -> {new} (face={face}, memory={memory}, semantic={semantic})")
+        return {"ok": True, "old": old, "new": new, "face": face, "memory": memory, "semantic": semantic}
 
     async def delete_person(self, name: str) -> dict:
         """Forget a person entirely: face, filesystem memory, and semantic memory."""

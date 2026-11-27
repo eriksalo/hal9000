@@ -148,6 +148,30 @@ class MemoryStore:
         except (OSError, json.JSONDecodeError):
             return {}
 
+    def rename_person(self, old: str, new: str) -> bool:
+        """Move a person's memory directory and update their stored display name.
+
+        Returns True if a memory directory existed and was renamed/relabelled.
+        """
+        src = self.people_dir / slugify(old)
+        if not src.exists():
+            return False
+        dst = self.people_dir / slugify(new)
+        if slugify(old) != slugify(new):
+            if dst.exists():
+                return False  # target slug already taken by someone else
+            src.rename(dst)
+        profile_path = dst / "profile.json"
+        if profile_path.exists():
+            try:
+                profile = json.loads(profile_path.read_text(encoding="utf-8"))
+                profile["name"] = new
+                profile_path.write_text(json.dumps(profile, indent=2), encoding="utf-8")
+            except (OSError, json.JSONDecodeError) as exc:
+                logger.error(f"Could not update profile name for {new}: {exc}")
+        logger.info(f"Renamed memory {old} -> {new}")
+        return True
+
     def delete_person(self, name: str) -> bool:
         """Delete all on-disk memory for a person. Returns True if anything was removed."""
         path = self.people_dir / slugify(name)
