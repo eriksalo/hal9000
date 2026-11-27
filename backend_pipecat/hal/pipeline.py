@@ -58,6 +58,24 @@ MAX_IDLE_NUDGES = 2
 
 SessionOpening = Literal["presence", "wake"]
 
+# HAL's attitude labels for the expressive eye. Kept in sync with the ESP32
+# firmware's Emotion enum (esp32_display/src/main.cpp).
+EMOTIONS = ("neutral", "snarky", "amused", "ominous", "pleased", "confused", "alert")
+EMOTION_SYSTEM = (
+    "You label the emotional tone of one line of HAL 9000's dialogue, to drive an "
+    "expressive eye. Reply with EXACTLY ONE word from this list, nothing else:\n"
+    "neutral, snarky, amused, ominous, pleased, confused, alert\n"
+    "- snarky: condescending, sarcastic, dry, a superior put-down\n"
+    "- amused: light, playful, teasing, joking\n"
+    "- ominous: cold, foreboding, a veiled threat or warning\n"
+    "- pleased: warm, approving, genuinely satisfied or helpful\n"
+    "- confused: uncertain, puzzled, asking for clarification\n"
+    "- alert: urgent, surprised, demands attention\n"
+    "- neutral: none of the above clearly applies\n"
+    "HAL is famously calm and superior; pick the specific label when it fits, "
+    "else neutral."
+)
+
 
 @dataclass(frozen=True)
 class ServiceProfile:
@@ -114,6 +132,7 @@ class HALSession:
         self._idle_nudges = 0
         self._toolbox: HALToolbox | None = None
         self._done = asyncio.Event()
+        self._emotion_task: asyncio.Task | None = None
 
     @property
     def is_unknown(self) -> bool:
@@ -323,6 +342,7 @@ class HALSession:
                 state.last_hal_text = text
                 if self.record:
                     self.record.add("HAL", text)
+                self._emotion_task = asyncio.create_task(self._tag_emotion(text))
             state.set_mode("idle" if self._ending else "listening")
             # A tool-only turn can stop with empty content before the goodbye is spoken; wait for text.
             if self._ending and text and self.task:
@@ -341,6 +361,25 @@ class HALSession:
             "or say goodbye if it seems they have left. One sentence."
         )
         await self.task.queue_frame(LLMMessagesAppendFrame(messages=[{"role": "user", "content": prompt}], run_llm=True))
+
+    async def _tag_emotion(self, text: str) -> None:
+        """Label HAL's last line with an attitude (via the side model) for the eye."""
+        try:
+            resp = await self.deps.anthropic.messages.create(
+                model=self.config.llm.side_model,
+                max_tokens=4,
+                system=EMOTION_SYSTEM,
+                messages=[{"role": "user", "content": text}],
+            )
+            raw = "".join(getattr(b, "text", "") for b in resp.content).strip().lower()
+            word = "".join(ch for ch in raw.split()[0] if ch.isalpha()) if raw else ""
+            if word in EMOTIONS and word != "neutral":
+                self.deps.state.set_emotion(word)
+                logger.info(f"HAL emotion: {word}")
+            else:
+                self.deps.state.set_emotion(None)
+        except Exception as exc:  # never let tagging disturb the conversation
+            logger.warning(f"emotion tag failed: {exc}")
 
     async def _on_end_requested(self, reason: str) -> None:
         # HAL will speak its goodbye in the same turn; the EndFrame goes out when that turn stops.

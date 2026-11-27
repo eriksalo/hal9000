@@ -27,9 +27,18 @@ class HALState:
     conversation_count: int = 0
     wake_armed: bool = False
     last_wake_at: float | None = None
+    # HAL's current attitude, inferred from what it just said. Drives the ESP32
+    # eye's color/motion; expires so the eye relaxes back to its base state.
+    emotion: str | None = None
+    emotion_until: float = 0.0
 
     def set_mode(self, mode: HALMode) -> None:
         self.mode = mode
+        self.updated_at = time.time()
+
+    def set_emotion(self, emotion: str | None, ttl: float = 8.0) -> None:
+        self.emotion = emotion
+        self.emotion_until = time.time() + ttl if emotion else 0.0
         self.updated_at = time.time()
 
     def display_payload(self) -> dict:
@@ -44,6 +53,8 @@ class HALState:
             # after they leave (see AppContext._display_name_loop). Only known
             # names are shown - no "Unknown" fallback from people_present.
             "person": self.person or self.display_name,
+            # HAL's attitude (snarky/amused/ominous/...), or None once it expires.
+            "emotion": self.emotion if (self.emotion and time.time() < self.emotion_until) else None,
         }
 
     def status_payload(self) -> dict:
@@ -58,5 +69,6 @@ class HALState:
             "conversation_count": self.conversation_count,
             "wake_armed": self.wake_armed,
             "last_wake_at": self.last_wake_at,
+            "emotion": self.emotion if (self.emotion and time.time() < self.emotion_until) else None,
             "updated_at": self.updated_at,
         }
