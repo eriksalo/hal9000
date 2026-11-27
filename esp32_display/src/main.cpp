@@ -128,6 +128,42 @@ struct EyeParams {
 // Live (eased) parameters; initialized to the idle animation.
 static EyeParams eye_cur = {230.f, 18.f, 13.f, 0.0012f, 0.14f, 0.06f, 1.3f, 0.0016f, 1.f, 0.92f, 0.f, 0.0006f};
 
+// ---- Emotion overlay: HAL's attitude, sent by the backend ------------------
+// When set it overrides the base state's color/motion so the eye reflects what
+// HAL just said (snarky, amused, ominous...). EMO_NONE falls back to the state.
+enum Emotion { EMO_NONE, EMO_SNARKY, EMO_AMUSED, EMO_OMINOUS, EMO_PLEASED, EMO_CONFUSED, EMO_ALERT };
+static Emotion emotion = EMO_NONE;
+static Emotion emotion_prev = EMO_NONE;
+
+static Emotion emotion_from_str(const String &s) {
+    if (s == "snarky")   return EMO_SNARKY;
+    if (s == "amused")   return EMO_AMUSED;
+    if (s == "ominous")  return EMO_OMINOUS;
+    if (s == "pleased")  return EMO_PLEASED;
+    if (s == "confused") return EMO_CONFUSED;
+    if (s == "alert")    return EMO_ALERT;
+    return EMO_NONE;
+}
+
+// ---- Gaze: the eye looks around by translating its canvas a few px ----------
+static float gaze_cur_x = 0, gaze_cur_y = 0;    // applied offset (eased)
+static float gaze_tgt_x = 0, gaze_tgt_y = 0;    // desired offset
+static unsigned long gaze_next_move = 0;        // when to pick a new idle target
+static unsigned long snark_roll_t0 = 0;         // snarky eye-roll cycle
+
+// ---- Blink: a quick collapse of brightness + core --------------------------
+static unsigned long blink_t0 = 0;              // start of the current blink (0 = none)
+static unsigned long blink_next = 0;            // when the next blink begins
+static int blink_queue = 0;                     // remaining follow-up blinks (double-blink)
+
+// ---- Focus lock: a brief flare when a known face is acquired ----------------
+static unsigned long focus_t0 = 0;              // start of focus flare (0 = none)
+
+// Per-frame outputs of update_eye_expression(), applied during the render.
+static float blink_mul = 1.0f;                  // brightness/core multiplier (blink dip)
+static float focus_flare = 0.0f;                // additive brightness bump on recognition
+static float focus_constrict = 1.0f;            // core radius multiplier on recognition
+
 // Face display objects
 static lv_obj_t *face_canvas = NULL;
 static lv_color_t *face_buffer = NULL;
@@ -301,6 +337,7 @@ void create_hal_eye(void)
 {
     // Black screen background; the eye lives inside a centered canvas.
     lv_obj_set_style_bg_color(lv_scr_act(), lv_color_black(), 0);
+    randomSeed(micros());   // vary idle gaze/blink timing across boots
 
     // Allocate the eye framebuffer and a distance-from-center LUT in PSRAM.
     size_t npx = (size_t)EYE_CANVAS_SIZE * EYE_CANVAS_SIZE;
@@ -385,28 +422,118 @@ void create_face_display(void)
     lv_canvas_fill_bg(face_canvas, lv_color_black(), LV_OPA_COVER);
 }
 
+// Drive the eye's physical "life": where it looks (gaze), occasional blinks, and
+// a brief flare when it recognizes someone. Writes the globals the renderer reads.
+static void update_eye_expression(float ms)
+{
+    unsigned long now = millis();
+
+    // --- Gaze target by context ---------------------------------------------
+    if (emotion == EMO_SNARKY) {
+        // Sidelong and unimpressed, with a periodic eye-roll.
+        unsigned long dt = now - snark_roll_t0;
+        if (dt > 6500) { snark_roll_t0 = now; dt = 0; }
+        if (dt < 440) { gaze_tgt_x = 4.f;  gaze_tgt_y = -18.f; }   // the roll
+        else          { gaze_tgt_x = 15.f; gaze_tgt_y = 6.f;   }   // back to sidelong
+    } else if (emotion == EMO_OMINOUS || current_person.length() > 0) {
+        gaze_tgt_x = 0.f; gaze_tgt_y = 0.f;                        // locked dead-on
+    } else if (emotion == EMO_NONE && eye_state == EYE_IDLE) {
+        if (now >= gaze_next_move) {                               // idle wander
+            gaze_tgt_x = (float)random(-14, 15);
+            gaze_tgt_y = (float)random(-11, 12);
+            gaze_next_move = now + (unsigned long)random(1400, 3800);
+        }
+    } else {
+        gaze_tgt_x = 0.f; gaze_tgt_y = 0.f;                        // engaged -> straight
+    }
+    gaze_cur_x += (gaze_tgt_x - gaze_cur_x) * 0.10f;
+    gaze_cur_y += (gaze_tgt_y - gaze_cur_y) * 0.10f;
+    lv_obj_set_style_translate_x(eye_canvas, (int)gaze_cur_x, 0);
+    lv_obj_set_style_translate_y(eye_canvas, (int)gaze_cur_y, 0);
+
+    // --- Blink: a quick V-shaped collapse of brightness + core --------------
+    if (blink_next == 0) blink_next = now + (unsigned long)random(2500, 7000);
+    blink_mul = 1.0f;
+    if (blink_t0) {
+        float bd = ms - (float)blink_t0;
+        const float BL = 170.f;                      // blink duration (ms)
+        if (bd >= BL) {
+            blink_t0 = 0;
+            if (blink_queue > 0) { blink_queue--; blink_next = now + 120; }
+        } else {
+            float u = bd / BL;
+            float v = 1.0f - 4.0f * u * (1.0f - u);   // 1 -> 0 -> 1, min at mid
+            blink_mul = 0.12f + 0.88f * v;
+        }
+    } else if (now >= blink_next && emotion != EMO_OMINOUS) {
+        blink_t0 = now;
+        blink_queue = (random(0, 100) < 18) ? 1 : 0; // ~18% double-blink
+        blink_next = now + (unsigned long)random(7000, 20000);
+    }
+
+    // --- Focus flare when a known face is acquired --------------------------
+    focus_flare = 0.0f; focus_constrict = 1.0f;
+    if (focus_t0) {
+        float fd = ms - (float)focus_t0;
+        const float FD = 1200.f;
+        if (fd >= FD) {
+            focus_t0 = 0;
+        } else {
+            float env = expf(-(fd / FD) * 3.0f);     // fast attack, decays out
+            focus_flare = env * 0.22f;               // a brightness bump
+            focus_constrict = 1.0f - 0.32f * env;    // core tightens, then relaxes
+        }
+    }
+}
+
 void update_hal_eye(lv_timer_t *timer)
 {
     if (current_mode == MODE_FACE || eye_buffer == NULL) return;
 
     float ms = (float)millis();
 
-    // --- Target parameters for the active state's animation -------------------
-    // Fields: hotR, hotG, coreR, breatheSpeed, breatheAmp,
-    //         waveAmp, waveFreq, waveSpeed, waveDir, glowLevel, jitter, glintSpeed
+    // --- Expression overlays: gaze, blink, focus ------------------------------
+    update_eye_expression(ms);
+
+    // --- Target parameters for the active look --------------------------------
+    // An active emotion (HAL's attitude) overrides the base state. Fields:
+    //   hotR, hotG, coreR, breatheSpeed, breatheAmp,
+    //   waveAmp, waveFreq, waveSpeed, waveDir, glowLevel, jitter, glintSpeed
     EyeParams tgt;
-    switch (eye_state) {
-    case EYE_LISTENING:   // alert, "receiving" - bright red, ripples expand OUTWARD
-        tgt = {255.f,  60.f, 15.f, 0.0022f, 0.12f, 0.16f, 2.2f, 0.0060f, -1.f, 1.05f, 0.00f, 0.0014f};
+    switch (emotion) {
+    case EMO_SNARKY:   // smug & unimpressed - cool amber, dim, slow lazy glint, tight core
+        tgt = {255.f,  92.f, 11.f, 0.0010f, 0.08f, 0.05f, 1.5f, 0.0014f,  1.f, 0.85f, 0.00f, 0.0010f};
         break;
-    case EYE_THINKING:    // contemplative - gold, bands march INWARD, glint sweeps the lens
-        tgt = {255.f, 150.f, 14.f, 0.0016f, 0.10f, 0.13f, 3.0f, 0.0050f,  1.f, 1.00f, 0.00f, 0.0032f};
+    case EMO_AMUSED:   // playful - bright gold, quick light ripples, bouncy glint
+        tgt = {255.f, 175.f, 16.f, 0.0042f, 0.14f, 0.14f, 2.6f, 0.0078f, -1.f, 1.06f, 0.00f, 0.0042f};
         break;
-    case EYE_SPEAKING:    // vocalizing - warm amber, brightness jitters like speech
-        tgt = {255.f, 105.f, 16.f, 0.0030f, 0.10f, 0.18f, 2.0f, 0.0100f,  1.f, 1.05f, 0.38f, 0.0012f};
+    case EMO_OMINOUS:  // the stare - deep blood red, pinpoint core, dead still
+        tgt = {210.f,   8.f,  8.f, 0.0006f, 0.05f, 0.03f, 1.0f, 0.0010f,  1.f, 0.80f, 0.00f, 0.0000f};
         break;
-    default:              // idle - calm, deep red, nearly still
-        tgt = {230.f,  18.f, 13.f, 0.0012f, 0.14f, 0.06f, 1.3f, 0.0016f,  1.f, 0.92f, 0.00f, 0.0006f};
+    case EMO_PLEASED:  // warm approval - soft, steady, bright
+        tgt = {255.f, 120.f, 17.f, 0.0014f, 0.10f, 0.07f, 1.6f, 0.0020f, -1.f, 1.10f, 0.00f, 0.0012f};
+        break;
+    case EMO_CONFUSED: // processing hard - gold, erratic ripples, nervous jitter, fast scan
+        tgt = {255.f, 140.f, 13.f, 0.0026f, 0.12f, 0.18f, 3.4f, 0.0092f,  1.f, 0.98f, 0.20f, 0.0052f};
+        break;
+    case EMO_ALERT:    // snapped to attention - bright, dilated core, outward flash
+        tgt = {255.f,  80.f, 22.f, 0.0036f, 0.06f, 0.12f, 2.0f, 0.0082f, -1.f, 1.15f, 0.00f, 0.0022f};
+        break;
+    default:
+        switch (eye_state) {
+        case EYE_LISTENING:   // alert, "receiving" - bright red, ripples expand OUTWARD
+            tgt = {255.f,  60.f, 15.f, 0.0022f, 0.12f, 0.16f, 2.2f, 0.0060f, -1.f, 1.05f, 0.00f, 0.0014f};
+            break;
+        case EYE_THINKING:    // contemplative - gold, bands march INWARD, glint sweeps the lens
+            tgt = {255.f, 150.f, 14.f, 0.0016f, 0.10f, 0.13f, 3.0f, 0.0050f,  1.f, 1.00f, 0.00f, 0.0032f};
+            break;
+        case EYE_SPEAKING:    // vocalizing - warm amber, brightness jitters like speech
+            tgt = {255.f, 105.f, 16.f, 0.0030f, 0.10f, 0.18f, 2.0f, 0.0100f,  1.f, 1.05f, 0.38f, 0.0012f};
+            break;
+        default:              // idle - calm, deep red, nearly still
+            tgt = {230.f,  18.f, 13.f, 0.0012f, 0.14f, 0.06f, 1.3f, 0.0016f,  1.f, 0.92f, 0.00f, 0.0006f};
+            break;
+        }
         break;
     }
 
@@ -441,14 +568,18 @@ void update_hal_eye(lv_timer_t *timer)
     float flick = sinf(ms * 0.013f) * sinf(ms * 0.07f);
     if (flick > 0.93f) bright *= 0.82f;
 
+    // Blink collapses brightness; focus-lock flares it on recognition.
+    bright = bright * blink_mul + focus_flare;
+
     // Accent ring: a bright band that expands and fades whenever the state changes.
     float acc_age = ms - (float)eye_accent_t0;
     float acc_r = acc_age * 0.42f;                                   // travels outward (px)
     float acc_amp = (acc_age < 1100.f) ? expf(-acc_age / 320.f) * 0.9f : 0.0f;
 
-    // White-hot core dilates on its own slow rhythm.
+    // White-hot core dilates on its own slow rhythm; a blink tightens it to a
+    // slit and recognition briefly constricts it.
     float coreShim = 0.5f + 0.5f * sinf(ms * 0.006f);
-    float coreR = c->coreR + coreShim * 3.0f;
+    float coreR = (c->coreR + coreShim * 3.0f) * (0.35f + 0.65f * blink_mul) * focus_constrict;
 
     // --- Build the radial color profile (one entry per pixel-radius) ----------
     // Kept at full 8-bit precision; dithered down to RGB565 during the fill so the
@@ -610,9 +741,23 @@ void check_display_state(void)
                 hal_speaking  = (eye_state == EYE_SPEAKING);
             }
 
-            // Get person name
+            // Get emotion -> overlay that overrides the state's color/motion.
+            if (doc["emotion"].is<const char*>()) {
+                Emotion ne = emotion_from_str(doc["emotion"].as<String>());
+                if (ne != emotion) {
+                    emotion_prev = emotion;
+                    emotion = ne;
+                    eye_accent_t0 = millis();   // pulse on mood change too
+                }
+            } else {
+                emotion = EMO_NONE;
+            }
+
+            // Get person name. A fresh recognition triggers the focus flare.
             if (doc["person"].is<const char*>()) {
-                current_person = doc["person"].as<String>();
+                String p = doc["person"].as<String>();
+                if (p.length() > 0 && current_person.length() == 0) focus_t0 = millis();
+                current_person = p;
             } else {
                 current_person = "";
             }
